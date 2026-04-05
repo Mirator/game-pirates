@@ -9,6 +9,9 @@ interface DebugSnapshot {
   playerReloadLeft: number;
   playerReloadRight: number;
   menuOpen: boolean;
+  activeEvent: string;
+  combatIntensity: number;
+  stormActive: boolean;
 }
 
 export interface DebugOverlay {
@@ -61,7 +64,8 @@ export function createDebugOverlay(root: HTMLElement, target: Window = window): 
         `Player HP ${snapshot.playerHp.toFixed(0)} / ${snapshot.playerMaxHp.toFixed(0)}\n` +
         `Enemies ${snapshot.enemiesAlive} | Loot ${snapshot.lootCount}\n` +
         `Gold ${snapshot.gold} | Mats ${snapshot.repairMaterials}\n` +
-        `Menu ${snapshot.menuOpen ? "OPEN" : "CLOSED"}\n` +
+        `Menu ${snapshot.menuOpen ? "OPEN" : "CLOSED"} | Storm ${snapshot.stormActive ? "YES" : "NO"}\n` +
+        `Event ${snapshot.activeEvent} | Combat ${snapshot.combatIntensity.toFixed(2)}\n` +
         `Reload L ${formatSeconds(snapshot.playerReloadLeft)}s | R ${formatSeconds(snapshot.playerReloadRight)}s`;
     },
     dispose: () => {

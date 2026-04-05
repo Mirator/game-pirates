@@ -9,7 +9,7 @@ import {
   SphereGeometry,
   Vector3
 } from "three";
-import { SINK_DURATION, type LootState, type ShipState, type WorldState } from "../../simulation";
+import { SINK_DURATION, type EnemyArchetype, type LootState, type ShipState, type WorldState } from "../../simulation";
 import type { EnvironmentObjects } from "../objects/createEnvironment";
 import { createShipMesh } from "../objects/createShipMesh";
 
@@ -51,6 +51,18 @@ function createLootMesh(loot: LootState): Mesh {
   );
 }
 
+function getEnemyPalette(archetype: EnemyArchetype): { hull: string; sail: string } {
+  switch (archetype) {
+    case "merchant":
+      return { hull: "#5d4c37", sail: "#ece3c4" };
+    case "navy":
+      return { hull: "#3a4f6b", sail: "#e6eef8" };
+    case "raider":
+    default:
+      return { hull: "#4e2d24", sail: "#d9d0b2" };
+  }
+}
+
 function applyShipPose(ship: ShipState, mesh: Group, time = 0): void {
   const sinkProgress = ship.status === "sinking" ? (SINK_DURATION - ship.sinkTimer) / SINK_DURATION : 0;
   const sinkOffset = -Math.max(0, sinkProgress) * 2.2;
@@ -81,7 +93,7 @@ function disposeGroup(group: Group): void {
 }
 
 export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderBridgeState, frameDt: number): void {
-  bridge.environment.update(worldState.time);
+  bridge.environment.syncFromWorld(worldState, frameDt);
 
   applyShipPose(worldState.player, bridge.playerMesh, worldState.time);
 
@@ -89,7 +101,8 @@ export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderB
   for (const enemy of worldState.enemies) {
     let enemyMesh = bridge.enemyMeshes.get(enemy.id);
     if (!enemyMesh) {
-      enemyMesh = createShipMesh("#4e2d24", "#d9d0b2");
+      const palette = getEnemyPalette(enemy.archetype);
+      enemyMesh = createShipMesh(palette.hull, palette.sail);
       bridge.enemyRoot.add(enemyMesh);
       bridge.enemyMeshes.set(enemy.id, enemyMesh);
     }

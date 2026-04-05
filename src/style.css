@@ -54,6 +54,11 @@ canvas {
   margin-top: 5px;
 }
 
+.hud-event {
+  color: #f7dfab;
+  font-weight: 700;
+}
+
 .meter-track {
   width: 100%;
   height: 10px;

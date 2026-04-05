@@ -2,8 +2,10 @@ export type ShipOwner = "player" | "enemy";
 export type CannonSide = "left" | "right";
 export type ShipStatus = "alive" | "sinking";
 export type EnemyAiState = "patrol" | "chase" | "broadside";
-export type EnemyArchetype = "raider";
+export type EnemyArchetype = "merchant" | "raider" | "navy";
 export type LootKind = "gold" | "repair_material";
+export type IslandKind = "port" | "treasure" | "hostile" | "scenic";
+export type WorldEventKind = "treasure_marker" | "enemy_convoy" | "storm" | "navy_patrol";
 
 export interface Vector2State {
   x: number;
@@ -37,6 +39,14 @@ export interface EnemyState extends ShipState {
   aiState: EnemyAiState;
   patrolAngle: number;
   lootDropped: boolean;
+}
+
+export interface IslandState {
+  id: number;
+  kind: IslandKind;
+  label: string;
+  position: Vector2State;
+  radius: number;
 }
 
 export interface ProjectileState {
@@ -86,6 +96,31 @@ export interface SpawnDirectorState {
   timer: number;
 }
 
+export interface TreasureObjectiveState {
+  active: boolean;
+  markerPosition: Vector2State;
+  targetIslandId: number | null;
+  rewardGold: number;
+  completedCount: number;
+}
+
+export interface StormState {
+  active: boolean;
+  center: Vector2State;
+  radius: number;
+  remaining: number;
+  intensity: number;
+}
+
+export interface EventDirectorState {
+  timer: number;
+  interval: number;
+  cycleIndex: number;
+  activeKind: WorldEventKind | null;
+  remaining: number;
+  statusText: string;
+}
+
 export interface PhaseFlags {
   playerRespawns: number;
   enemiesSunk: number;
@@ -101,7 +136,9 @@ export type SimulationEvent =
   | { type: "dock_open" }
   | { type: "dock_close" }
   | { type: "repair_used" }
-  | { type: "upgrade_purchased"; level: number };
+  | { type: "upgrade_purchased"; level: number }
+  | { type: "treasure_collected"; amount: number }
+  | { type: "world_event_started"; kind: WorldEventKind };
 
 export interface WorldState {
   time: number;
@@ -112,6 +149,7 @@ export interface WorldState {
   nextEnemyId: number;
   nextLootId: number;
   player: ShipState;
+  islands: IslandState[];
   enemies: EnemyState[];
   projectiles: ProjectileState[];
   loot: LootState[];
@@ -119,6 +157,10 @@ export interface WorldState {
   upgrade: UpgradeState;
   port: PortState;
   spawnDirector: SpawnDirectorState;
+  treasureObjective: TreasureObjectiveState;
+  storm: StormState;
+  eventDirector: EventDirectorState;
+  combatIntensity: number;
   events: SimulationEvent[];
 }
 

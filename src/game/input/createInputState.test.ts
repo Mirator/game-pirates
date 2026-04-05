@@ -1,0 +1,65 @@
+import { describe, expect, it } from "vitest";
+import { createInputState } from "./createInputState";
+
+interface MockKeyboardEvent {
+  code: string;
+  key: string;
+  repeat: boolean;
+  preventDefault: () => void;
+}
+
+type Listener = (event: MockKeyboardEvent) => void;
+
+class MockWindowTarget {
+  private listeners = new Map<string, Set<Listener>>();
+
+  addEventListener(type: string, listener: Listener): void {
+    const set = this.listeners.get(type) ?? new Set<Listener>();
+    set.add(listener);
+    this.listeners.set(type, set);
+  }
+
+  removeEventListener(type: string, listener: Listener): void {
+    this.listeners.get(type)?.delete(listener);
+  }
+
+  dispatch(type: string, event: Omit<MockKeyboardEvent, "preventDefault">): void {
+    const payload: MockKeyboardEvent = {
+      ...event,
+      preventDefault: () => {}
+    };
+    this.listeners.get(type)?.forEach((listener) => listener(payload));
+  }
+}
+
+describe("createInputState", () => {
+  it("uses letter semantics via event.key for A/Q on non-qwerty layouts", () => {
+    const target = new MockWindowTarget();
+    const controller = createInputState(target as unknown as Window);
+
+    target.dispatch("keydown", { code: "KeyQ", key: "a", repeat: false });
+    expect(controller.state.turn).toBe(1);
+    expect(controller.state.fireLeft).toBe(false);
+
+    target.dispatch("keyup", { code: "KeyQ", key: "a", repeat: false });
+    expect(controller.state.turn).toBe(0);
+
+    target.dispatch("keydown", { code: "KeyA", key: "q", repeat: false });
+    expect(controller.state.fireLeft).toBe(true);
+    expect(controller.state.turn).toBe(0);
+
+    target.dispatch("keyup", { code: "KeyA", key: "q", repeat: false });
+    expect(controller.state.fireLeft).toBe(false);
+  });
+
+  it("falls back to event.code when key label is non-latin", () => {
+    const target = new MockWindowTarget();
+    const controller = createInputState(target as unknown as Window);
+
+    target.dispatch("keydown", { code: "KeyA", key: "ф", repeat: false });
+    expect(controller.state.turn).toBe(1);
+
+    target.dispatch("keyup", { code: "KeyA", key: "ф", repeat: false });
+    expect(controller.state.turn).toBe(0);
+  });
+});

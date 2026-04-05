@@ -6,7 +6,10 @@ export type {
   EnemyArchetype,
   EnemyAiState,
   EnemyState,
+  EventDirectorState,
   InputState,
+  IslandKind,
+  IslandState,
   LootKind,
   LootState,
   PhaseFlags,
@@ -16,7 +19,10 @@ export type {
   ShipOwner,
   ShipState,
   SpawnDirectorState,
+  StormState,
+  TreasureObjectiveState,
   UpgradeState,
   WalletState,
+  WorldEventKind,
   WorldState
 } from "./types";

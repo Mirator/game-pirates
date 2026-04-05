@@ -8,6 +8,13 @@ export const PORT_POSITION = { x: 0, z: 48 };
 export const PORT_RADIUS = 15;
 export const PORT_PROMPT_RADIUS = 22;
 export const PORT_SAFE_RADIUS = 24;
+export const ISLAND_LAYOUT = [
+  { id: 0, kind: "port", label: "Port Haven", x: 0, z: 48, radius: 13 },
+  { id: 1, kind: "treasure", label: "Skull Key", x: -58, z: 22, radius: 11 },
+  { id: 2, kind: "hostile", label: "Redwatch", x: 56, z: -40, radius: 12 },
+  { id: 3, kind: "scenic", label: "Palmrest", x: -22, z: -56, radius: 10 },
+  { id: 4, kind: "treasure", label: "Sunken Crown", x: 62, z: 38, radius: 10 }
+] as const;
 export const ENEMY_SPAWN_POINTS = [
   { x: 45, z: -34, heading: Math.PI * 0.62 },
   { x: -54, z: -32, heading: Math.PI * 1.78 },
@@ -48,9 +55,10 @@ export const CANNON_FIRING_CONE_DOT = 0.35;
 
 export const ENEMY_DETECTION_RANGE = 68;
 export const ENEMY_BROADSIDE_RANGE = 18;
-export const ENEMY_SPAWN_MAX_ACTIVE = 2;
+export const ENEMY_SPAWN_MAX_ACTIVE = 3;
 export const ENEMY_INITIAL_SPAWN_DELAY = 2;
-export const ENEMY_STAGGER_SPAWN_DELAY = 10;
+export const ENEMY_STAGGER_SPAWN_DELAY = 8;
+export const ENEMY_HARD_CAP = 4;
 
 export const LOOT_LIFETIME = 20;
 export const LOOT_PICKUP_RADIUS = 3.2;
@@ -58,3 +66,17 @@ export const LOOT_PICKUP_RADIUS = 3.2;
 export const UPGRADE_HULL_HP_BONUS = 20;
 export const UPGRADE_HULL_COST_START = 60;
 export const UPGRADE_HULL_COST_STEP = 40;
+
+export const TREASURE_INTERACT_RADIUS = 9;
+export const TREASURE_REWARD_BASE = 90;
+export const TREASURE_REWARD_STEP = 25;
+
+export const EVENT_INTERVAL = 36;
+export const EVENT_TREASURE_DURATION = 28;
+export const EVENT_CONVOY_DURATION = 24;
+export const EVENT_STORM_DURATION = 32;
+export const EVENT_NAVY_DURATION = 24;
+
+export const STORM_RADIUS = 24;
+export const STORM_INTENSITY_MAX = 0.55;
+export const STORM_SPEED_MULTIPLIER = 0.72;

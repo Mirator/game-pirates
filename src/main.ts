@@ -51,6 +51,13 @@ const loop = createLoop({
     updateSimulation(worldState, inputController.state, dt);
     inputController.consumeFrameFlags();
 
+    audioSystem.syncMusic({
+      combatIntensity: worldState.combatIntensity,
+      menuOpen: worldState.port.menuOpen,
+      activeEvent: worldState.eventDirector.activeKind,
+      stormActive: worldState.storm.active
+    });
+
     const events = drainSimulationEvents(worldState);
     audioSystem.handleEvents(events);
   },
@@ -75,7 +82,10 @@ const loop = createLoop({
       repairMaterials: worldState.wallet.repairMaterials,
       playerReloadLeft: worldState.player.reload.left,
       playerReloadRight: worldState.player.reload.right,
-      menuOpen: worldState.port.menuOpen
+      menuOpen: worldState.port.menuOpen,
+      activeEvent: worldState.eventDirector.activeKind ?? "none",
+      combatIntensity: worldState.combatIntensity,
+      stormActive: worldState.storm.active
     });
     hud.update(worldState);
 

@@ -1,4 +1,4 @@
-import type { WorldState } from "../simulation";
+import { TREASURE_INTERACT_RADIUS, type WorldEventKind, type WorldState } from "../simulation";
 
 interface HudOptions {
   onUpgradeRequest: () => void;
@@ -9,6 +9,10 @@ interface HudOptions {
 export interface HudController {
   update: (worldState: WorldState) => void;
   dispose: () => void;
+}
+
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
 }
 
 function isLootNearby(worldState: WorldState): boolean {
@@ -25,6 +29,53 @@ function isLootNearby(worldState: WorldState): boolean {
     }
   }
   return false;
+}
+
+function isTreasureNearby(worldState: WorldState): boolean {
+  if (!worldState.treasureObjective.active) {
+    return false;
+  }
+  const marker = worldState.treasureObjective.markerPosition;
+  const dx = marker.x - worldState.player.position.x;
+  const dz = marker.z - worldState.player.position.z;
+  return dx * dx + dz * dz <= TREASURE_INTERACT_RADIUS ** 2;
+}
+
+function getIslandLabel(worldState: WorldState, islandId: number | null): string {
+  if (islandId === null) {
+    return "Unknown isle";
+  }
+  return worldState.islands.find((island) => island.id === islandId)?.label ?? "Unknown isle";
+}
+
+function formatEventLabel(kind: WorldEventKind | null): string {
+  switch (kind) {
+    case "treasure_marker":
+      return "Treasure Marker";
+    case "enemy_convoy":
+      return "Enemy Convoy";
+    case "storm":
+      return "Storm Front";
+    case "navy_patrol":
+      return "Navy Patrol";
+    default:
+      return "Open Seas";
+  }
+}
+
+function getIslandMinimapColor(kind: string): string {
+  switch (kind) {
+    case "port":
+      return "#f2d082";
+    case "treasure":
+      return "#ffd75c";
+    case "hostile":
+      return "#d96f66";
+    case "scenic":
+      return "#87d6ab";
+    default:
+      return "#d7e3ea";
+  }
 }
 
 function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): void {
@@ -46,7 +97,7 @@ function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): void {
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.strokeStyle = "rgba(220, 238, 248, 0.4)";
+  ctx.strokeStyle = "rgba(220, 238, 248, 0.42)";
   ctx.lineWidth = 1.5;
   ctx.beginPath();
   ctx.arc(centerX, centerY, radius, 0, Math.PI * 2);
@@ -69,30 +120,61 @@ function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): void {
     ctx.fill();
   };
 
-  drawDot(worldState.port.position.x, worldState.port.position.z, "#f2d082", 4.4);
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(centerX, centerY, radius - 1, 0, Math.PI * 2);
+  ctx.clip();
+
+  if (worldState.storm.active) {
+    const stormX = centerX + worldState.storm.center.x * worldToPixel;
+    const stormY = centerY - worldState.storm.center.z * worldToPixel;
+    const stormRadius = worldState.storm.radius * worldToPixel;
+
+    ctx.strokeStyle = "rgba(161, 196, 219, 0.65)";
+    ctx.lineWidth = 1.4;
+    ctx.beginPath();
+    ctx.arc(stormX, stormY, stormRadius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.fillStyle = "rgba(112, 147, 176, 0.18)";
+    ctx.beginPath();
+    ctx.arc(stormX, stormY, stormRadius, 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  for (const island of worldState.islands) {
+    drawDot(island.position.x, island.position.z, getIslandMinimapColor(island.kind), island.kind === "port" ? 4.3 : 2.5);
+  }
 
   for (const loot of worldState.loot) {
     if (!loot.active) {
       continue;
     }
-    drawDot(loot.position.x, loot.position.z, loot.kind === "gold" ? "#ffd54f" : "#8ae5af", 2.3);
+    drawDot(loot.position.x, loot.position.z, loot.kind === "gold" ? "#ffd54f" : "#8ae5af", 2.2);
+  }
+
+  if (worldState.treasureObjective.active) {
+    drawDot(worldState.treasureObjective.markerPosition.x, worldState.treasureObjective.markerPosition.z, "#ffe68d", 3.6);
+    drawDot(worldState.treasureObjective.markerPosition.x, worldState.treasureObjective.markerPosition.z, "#6c5320", 1.2);
   }
 
   for (const enemy of worldState.enemies) {
     if (enemy.status !== "alive") {
       continue;
     }
-    drawDot(enemy.position.x, enemy.position.z, "#ff6f62", 3);
+    const color = enemy.archetype === "navy" ? "#8cb8e8" : enemy.archetype === "merchant" ? "#f1cf8b" : "#ff6f62";
+    drawDot(enemy.position.x, enemy.position.z, color, enemy.archetype === "navy" ? 3.3 : 2.9);
   }
+
+  ctx.restore();
 
   const player = worldState.player;
   const playerX = centerX + player.position.x * worldToPixel;
   const playerY = centerY - player.position.z * worldToPixel;
-  const heading = player.heading;
 
   ctx.save();
   ctx.translate(playerX, playerY);
-  ctx.rotate(heading);
+  ctx.rotate(player.heading);
   ctx.fillStyle = "#f3fbff";
   ctx.beginPath();
   ctx.moveTo(0, -5.5);
@@ -132,6 +214,10 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
   const walletLabel = document.createElement("div");
   walletLabel.className = "hud-row";
   topLeft.appendChild(walletLabel);
+
+  const eventLabel = document.createElement("div");
+  eventLabel.className = "hud-row hud-event";
+  topLeft.appendChild(eventLabel);
 
   const objectiveLabel = document.createElement("div");
   objectiveLabel.className = "hud-objective";
@@ -206,17 +292,29 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
       reloadLabel.textContent = `Cannons L ${worldState.player.reload.left.toFixed(1)}s  R ${worldState.player.reload.right.toFixed(1)}s`;
       walletLabel.textContent = `Gold ${worldState.wallet.gold}  Materials ${worldState.wallet.repairMaterials}`;
 
-      if (worldState.wallet.gold >= worldState.upgrade.nextCost) {
+      const eventTitle = formatEventLabel(worldState.eventDirector.activeKind);
+      if (worldState.eventDirector.activeKind) {
+        eventLabel.textContent = `${eventTitle}  ${Math.ceil(Math.max(0, worldState.eventDirector.remaining))}s`;
+      } else {
+        eventLabel.textContent = `${eventTitle}  next in ${Math.ceil(Math.max(0, worldState.eventDirector.timer))}s`;
+      }
+
+      if (worldState.treasureObjective.active) {
+        objectiveLabel.textContent = `Objective: Reach ${getIslandLabel(worldState, worldState.treasureObjective.targetIslandId)} and press Space (+${worldState.treasureObjective.rewardGold}g).`;
+      } else if (worldState.wallet.gold >= worldState.upgrade.nextCost) {
         objectiveLabel.textContent = "Objective: Dock at port and buy Hull Reinforcement.";
       } else {
-        objectiveLabel.textContent = "Objective: Sink raiders, collect loot, and grow your ship.";
+        objectiveLabel.textContent = worldState.eventDirector.statusText;
       }
 
       const lootNearby = isLootNearby(worldState);
+      const treasureNearby = isTreasureNearby(worldState);
       if (worldState.port.menuOpen) {
         prompt.textContent = "Docked. Use menu, then press Esc or Space to undock.";
       } else if (lootNearby) {
         prompt.textContent = "Press Space to collect floating loot.";
+      } else if (treasureNearby) {
+        prompt.textContent = "Press Space to secure treasure cache.";
       } else if (worldState.port.playerNearPort) {
         prompt.textContent = "Press Space to dock at port.";
       } else if (
@@ -226,7 +324,7 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
       ) {
         prompt.textContent = "Press R to use repair materials.";
       } else {
-        prompt.textContent = "Sail, broadside, and collect treasure.";
+        prompt.textContent = "Sail, broadside, and chase marked opportunities.";
       }
 
       upgradeMeta.textContent =
@@ -242,8 +340,4 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
       layer.remove();
     }
   };
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
 }

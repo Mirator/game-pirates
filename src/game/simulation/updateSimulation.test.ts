@@ -37,10 +37,19 @@ function stepUntil(worldState: WorldState, predicate: () => boolean, maxSteps: n
   }
 }
 
-describe("updateSimulation phase 2", () => {
+function quietWorld(worldState: WorldState): void {
+  worldState.spawnDirector.maxActive = 0;
+  worldState.spawnDirector.timer = 999;
+  worldState.eventDirector.timer = 999;
+  worldState.eventDirector.activeKind = null;
+  worldState.eventDirector.remaining = 0;
+  worldState.storm.active = false;
+}
+
+describe("updateSimulation phase 3", () => {
   it("integrates movement and preserves reload gating", () => {
     const worldState = createInitialWorldState();
-    worldState.spawnDirector.maxActive = 0;
+    quietWorld(worldState);
 
     const startHeading = worldState.player.heading;
     const startX = worldState.player.position.x;
@@ -61,8 +70,33 @@ describe("updateSimulation phase 2", () => {
     expect(worldState.nextProjectileId).toBeGreaterThan(projectileAfterFirstShot);
   });
 
-  it("spawns enemies with initial and staggered timing up to cap 2", () => {
+  it("fires from matching cannon side for port and starboard", () => {
     const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    worldState.player.position.x = 0;
+    worldState.player.position.z = 0;
+    worldState.player.heading = 0;
+
+    updateSimulation(worldState, { ...neutralInput, fireLeft: true }, FIXED_TIME_STEP);
+    expect(worldState.player.reload.left).toBeGreaterThan(0);
+    expect(worldState.player.reload.right).toBe(0);
+    worldState.player.reload.right = 0;
+    updateSimulation(worldState, { ...neutralInput, fireRight: true }, FIXED_TIME_STEP);
+    expect(worldState.player.reload.right).toBeGreaterThan(0);
+
+    expect(worldState.projectiles.length).toBeGreaterThanOrEqual(2);
+
+    const leftShot = worldState.projectiles.find((projectile) => projectile.id === 1);
+    const rightShot = worldState.projectiles.find((projectile) => projectile.id === 2);
+
+    expect(leftShot?.position.x ?? 0).toBeGreaterThan(0);
+    expect(rightShot?.position.x ?? 0).toBeLessThan(0);
+  });
+
+  it("spawns enemies with initial and staggered timing up to cap 3", () => {
+    const worldState = createInitialWorldState();
+    worldState.eventDirector.timer = 999;
 
     const firstSpawnSteps = Math.ceil(ENEMY_INITIAL_SPAWN_DELAY / FIXED_TIME_STEP);
     step(worldState, neutralInput, firstSpawnSteps - 1);
@@ -78,12 +112,17 @@ describe("updateSimulation phase 2", () => {
     stepUntil(worldState, () => worldState.enemies.length === 2, staggerSteps);
     expect(worldState.enemies.length).toBe(2);
 
-    step(worldState, neutralInput, staggerSteps * 2);
-    expect(worldState.enemies.length).toBeLessThanOrEqual(2);
+    stepUntil(worldState, () => worldState.enemies.length === 3, staggerSteps + 2);
+    expect(worldState.enemies.length).toBe(3);
+
+    step(worldState, neutralInput, Math.floor(staggerSteps / 2));
+    expect(worldState.enemies.length).toBeLessThanOrEqual(3);
   });
 
   it("sinks enemies, drops loot, and removes sunk enemy after timer", () => {
     const worldState = createInitialWorldState();
+    worldState.eventDirector.timer = 999;
+
     step(worldState, neutralInput, Math.ceil(ENEMY_INITIAL_SPAWN_DELAY / FIXED_TIME_STEP) + 1);
     worldState.spawnDirector.maxActive = 0;
 
@@ -114,7 +153,8 @@ describe("updateSimulation phase 2", () => {
 
   it("collects loot with interact before docking when both are possible", () => {
     const worldState = createInitialWorldState();
-    worldState.spawnDirector.maxActive = 0;
+    quietWorld(worldState);
+
     worldState.player.position.x = PORT_POSITION.x;
     worldState.player.position.z = PORT_POSITION.z;
 
@@ -138,7 +178,7 @@ describe("updateSimulation phase 2", () => {
 
   it("consumes repair materials with cooldown and hp cap", () => {
     const worldState = createInitialWorldState();
-    worldState.spawnDirector.maxActive = 0;
+    quietWorld(worldState);
 
     worldState.wallet.repairMaterials = 2;
     worldState.player.hp = 40;
@@ -155,6 +195,8 @@ describe("updateSimulation phase 2", () => {
 
   it("purchases hull upgrade with correct cost scaling and hp increase", () => {
     const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
     worldState.port.menuOpen = true;
     worldState.wallet.gold = 200;
     worldState.player.hp = 50;
@@ -172,9 +214,10 @@ describe("updateSimulation phase 2", () => {
     expect(worldState.upgrade.hullLevel).toBe(1);
   });
 
-  it("opens dock menu by interact when in range and no nearby loot", () => {
+  it("opens dock menu by interact when in range and pauses movement", () => {
     const worldState = createInitialWorldState();
-    worldState.spawnDirector.maxActive = 0;
+    quietWorld(worldState);
+
     worldState.player.position.x = PORT_POSITION.x;
     worldState.player.position.z = PORT_POSITION.z;
 
@@ -186,5 +229,50 @@ describe("updateSimulation phase 2", () => {
     updateSimulation(worldState, { ...neutralInput, throttle: 1 }, FIXED_TIME_STEP);
     expect(worldState.player.position.x).toBeCloseTo(xBefore, 5);
     expect(worldState.player.position.z).toBeCloseTo(zBefore, 5);
+  });
+
+  it("activates treasure event and grants reward on interact at marker", () => {
+    const worldState = createInitialWorldState();
+    worldState.spawnDirector.maxActive = 0;
+    worldState.eventDirector.timer = 0;
+    worldState.eventDirector.cycleIndex = 0;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+    expect(worldState.eventDirector.activeKind).toBe("treasure_marker");
+    expect(worldState.treasureObjective.active).toBe(true);
+
+    const reward = worldState.treasureObjective.rewardGold;
+    worldState.player.position.x = worldState.treasureObjective.markerPosition.x;
+    worldState.player.position.z = worldState.treasureObjective.markerPosition.z;
+
+    updateSimulation(worldState, { ...neutralInput, interact: true }, FIXED_TIME_STEP);
+
+    expect(worldState.treasureObjective.active).toBe(false);
+    expect(worldState.wallet.gold).toBe(reward);
+    expect(worldState.wallet.repairMaterials).toBe(1);
+    expect(worldState.treasureObjective.completedCount).toBe(1);
+  });
+
+  it("applies stronger speed penalty when storm is active around player", () => {
+    const clearWorld = createInitialWorldState();
+    quietWorld(clearWorld);
+    clearWorld.player.speed = 10;
+    clearWorld.player.drift = 3;
+
+    const stormWorld = createInitialWorldState();
+    quietWorld(stormWorld);
+    stormWorld.player.speed = 10;
+    stormWorld.player.drift = 3;
+    stormWorld.storm.active = true;
+    stormWorld.storm.center.x = stormWorld.player.position.x;
+    stormWorld.storm.center.z = stormWorld.player.position.z;
+    stormWorld.storm.radius = 26;
+    stormWorld.storm.intensity = 0.55;
+
+    updateSimulation(clearWorld, neutralInput, FIXED_TIME_STEP);
+    updateSimulation(stormWorld, neutralInput, FIXED_TIME_STEP);
+
+    expect(stormWorld.player.speed).toBeLessThan(clearWorld.player.speed);
+    expect(Math.abs(stormWorld.player.drift)).toBeLessThan(Math.abs(clearWorld.player.drift));
   });
 });

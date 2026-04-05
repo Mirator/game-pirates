@@ -2,17 +2,22 @@ import {
   ENEMY_INITIAL_SPAWN_DELAY,
   ENEMY_SPAWN_MAX_ACTIVE,
   ENEMY_STAGGER_SPAWN_DELAY,
+  EVENT_INTERVAL,
+  ISLAND_LAYOUT,
   PORT_POSITION,
   PORT_PROMPT_RADIUS,
   PORT_RADIUS,
   PORT_SAFE_RADIUS,
   PLAYER_RESPAWN,
-  UPGRADE_HULL_COST_START,
   SHIP_MAX_HP,
   SHIP_RADIUS,
+  STORM_INTENSITY_MAX,
+  STORM_RADIUS,
+  TREASURE_REWARD_BASE,
+  UPGRADE_HULL_COST_START,
   WORLD_BOUNDS_RADIUS
 } from "./constants";
-import type { ShipOwner, ShipState, WorldState } from "./types";
+import type { IslandState, ShipOwner, ShipState, WorldState } from "./types";
 
 function createShip(owner: ShipOwner, spawn: { x: number; z: number; heading: number }): ShipState {
   return {
@@ -32,6 +37,16 @@ function createShip(owner: ShipOwner, spawn: { x: number; z: number; heading: nu
   };
 }
 
+function createIslands(): IslandState[] {
+  return ISLAND_LAYOUT.map((island) => ({
+    id: island.id,
+    kind: island.kind,
+    label: island.label,
+    position: { x: island.x, z: island.z },
+    radius: island.radius
+  }));
+}
+
 export function createInitialWorldState(): WorldState {
   return {
     time: 0,
@@ -47,6 +62,7 @@ export function createInitialWorldState(): WorldState {
     nextEnemyId: 1,
     nextLootId: 1,
     player: createShip("player", PLAYER_RESPAWN),
+    islands: createIslands(),
     enemies: [],
     projectiles: [],
     loot: [],
@@ -73,6 +89,29 @@ export function createInitialWorldState(): WorldState {
       staggerDelay: ENEMY_STAGGER_SPAWN_DELAY,
       timer: ENEMY_INITIAL_SPAWN_DELAY
     },
+    treasureObjective: {
+      active: false,
+      markerPosition: { x: -58, z: 22 },
+      targetIslandId: null,
+      rewardGold: TREASURE_REWARD_BASE,
+      completedCount: 0
+    },
+    storm: {
+      active: false,
+      center: { x: 34, z: -18 },
+      radius: STORM_RADIUS,
+      remaining: 0,
+      intensity: STORM_INTENSITY_MAX
+    },
+    eventDirector: {
+      timer: EVENT_INTERVAL * 0.6,
+      interval: EVENT_INTERVAL,
+      cycleIndex: 0,
+      activeKind: null,
+      remaining: 0,
+      statusText: "Sail into contested waters and watch for events."
+    },
+    combatIntensity: 0,
     events: []
   };
 }
