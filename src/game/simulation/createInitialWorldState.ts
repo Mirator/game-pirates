@@ -3,6 +3,7 @@ import {
   ENEMY_SPAWN_MAX_ACTIVE,
   ENEMY_STAGGER_SPAWN_DELAY,
   PORT_POSITION,
+  PORT_PROMPT_RADIUS,
   PORT_RADIUS,
   PORT_SAFE_RADIUS,
   PLAYER_RESPAWN,
@@ -60,9 +61,11 @@ export function createInitialWorldState(): WorldState {
     port: {
       position: { x: PORT_POSITION.x, z: PORT_POSITION.z },
       radius: PORT_RADIUS,
+      promptRadius: PORT_PROMPT_RADIUS,
       safeRadius: PORT_SAFE_RADIUS,
       menuOpen: false,
-      playerInRange: false
+      playerInRange: false,
+      playerNearPort: false
     },
     spawnDirector: {
       maxActive: ENEMY_SPAWN_MAX_ACTIVE,

@@ -5,7 +5,8 @@ export const WORLD_BOUNDS_RADIUS = 95;
 
 export const PLAYER_RESPAWN = { x: 0, z: -10, heading: 0 };
 export const PORT_POSITION = { x: 0, z: 48 };
-export const PORT_RADIUS = 12;
+export const PORT_RADIUS = 15;
+export const PORT_PROMPT_RADIUS = 22;
 export const PORT_SAFE_RADIUS = 24;
 export const ENEMY_SPAWN_POINTS = [
   { x: 45, z: -34, heading: Math.PI * 0.62 },

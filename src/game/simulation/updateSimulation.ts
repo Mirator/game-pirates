@@ -117,8 +117,11 @@ function updatePortRange(worldState: WorldState): void {
   const player = worldState.player;
   const port = worldState.port;
   const rangeSq = port.radius * port.radius;
+  const promptRangeSq = port.promptRadius * port.promptRadius;
   port.playerInRange =
     distanceSquared(player.position.x, player.position.z, port.position.x, port.position.z) <= rangeSq;
+  port.playerNearPort =
+    distanceSquared(player.position.x, player.position.z, port.position.x, port.position.z) <= promptRangeSq;
 
   if (!port.playerInRange && port.menuOpen) {
     togglePortMenu(worldState, false);

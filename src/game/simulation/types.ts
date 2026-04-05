@@ -72,9 +72,11 @@ export interface UpgradeState {
 export interface PortState {
   position: Vector2State;
   radius: number;
+  promptRadius: number;
   safeRadius: number;
   menuOpen: boolean;
   playerInRange: boolean;
+  playerNearPort: boolean;
 }
 
 export interface SpawnDirectorState {

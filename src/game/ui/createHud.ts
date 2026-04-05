@@ -217,7 +217,7 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
         prompt.textContent = "Docked. Use menu, then press Esc or Space to undock.";
       } else if (lootNearby) {
         prompt.textContent = "Press Space to collect floating loot.";
-      } else if (worldState.port.playerInRange) {
+      } else if (worldState.port.playerNearPort) {
         prompt.textContent = "Press Space to dock at port.";
       } else if (
         worldState.player.repairCooldown <= 0 &&
