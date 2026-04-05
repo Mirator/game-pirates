@@ -1,18 +1,22 @@
-# Blackwake Isles - Phase 1 Prototype
+# Blackwake Isles - Phase 2 First Playable
 
-Phase 1 browser prototype for the pirate game design:
-- water and sky
-- player ship movement
-- follow camera
-- one enemy ship
-- cannon firing with side reload timers
-- hull HP, sinking, and auto-respawn loop
+Phase 2 browser prototype for the pirate game design:
+- stylized sea map with port marker and enemy spawns
+- player ship movement, follow camera, and broadside cannon combat
+- enemy spawn director (up to 2 active raiders with staggered pressure)
+- loot drops (gold and repair materials)
+- dock interaction + upgrade menu (Hull Reinforcement)
+- HUD with minimap, resources, reload timers, objective and prompts
+- synthesized WebAudio SFX for combat, loot, docking, repair, and upgrade
 
 ## Controls
 
 - `W` / `S`: accelerate / decelerate
 - `A` / `D`: turn left / right
 - `Q` / `E`: fire left / right cannons
+- `Space`: collect loot / dock / undock
+- `R`: consume repair material to repair hull (cooldown applies)
+- `Esc`: close dock menu
 - `F3`: toggle debug overlay
 
 ## Scripts

@@ -2,6 +2,8 @@ export type ShipOwner = "player" | "enemy";
 export type CannonSide = "left" | "right";
 export type ShipStatus = "alive" | "sinking";
 export type EnemyAiState = "patrol" | "chase" | "broadside";
+export type EnemyArchetype = "raider";
+export type LootKind = "gold" | "repair_material";
 
 export interface Vector2State {
   x: number;
@@ -26,11 +28,15 @@ export interface ShipState {
   reload: CannonReloadState;
   status: ShipStatus;
   sinkTimer: number;
+  repairCooldown: number;
 }
 
 export interface EnemyState extends ShipState {
+  id: number;
+  archetype: EnemyArchetype;
   aiState: EnemyAiState;
   patrolAngle: number;
+  lootDropped: boolean;
 }
 
 export interface ProjectileState {
@@ -42,10 +48,58 @@ export interface ProjectileState {
   active: boolean;
 }
 
+export interface LootState {
+  id: number;
+  kind: LootKind;
+  amount: number;
+  position: Vector2State;
+  driftVelocity: Vector2State;
+  lifetime: number;
+  pickupRadius: number;
+  active: boolean;
+}
+
+export interface WalletState {
+  gold: number;
+  repairMaterials: number;
+}
+
+export interface UpgradeState {
+  hullLevel: number;
+  nextCost: number;
+}
+
+export interface PortState {
+  position: Vector2State;
+  radius: number;
+  safeRadius: number;
+  menuOpen: boolean;
+  playerInRange: boolean;
+}
+
+export interface SpawnDirectorState {
+  maxActive: number;
+  initialSpawnDelay: number;
+  staggerDelay: number;
+  timer: number;
+}
+
 export interface PhaseFlags {
   playerRespawns: number;
-  enemyRespawns: number;
+  enemiesSunk: number;
+  lootCollected: number;
+  goldCollected: number;
 }
+
+export type SimulationEvent =
+  | { type: "cannon_fire"; owner: ShipOwner }
+  | { type: "ship_hit"; target: ShipOwner }
+  | { type: "ship_sunk"; owner: ShipOwner }
+  | { type: "loot_pickup"; kind: LootKind; amount: number }
+  | { type: "dock_open" }
+  | { type: "dock_close" }
+  | { type: "repair_used" }
+  | { type: "upgrade_purchased"; level: number };
 
 export interface WorldState {
   time: number;
@@ -53,9 +107,17 @@ export interface WorldState {
   flags: PhaseFlags;
   boundsRadius: number;
   nextProjectileId: number;
+  nextEnemyId: number;
+  nextLootId: number;
   player: ShipState;
-  enemy: EnemyState;
+  enemies: EnemyState[];
   projectiles: ProjectileState[];
+  loot: LootState[];
+  wallet: WalletState;
+  upgrade: UpgradeState;
+  port: PortState;
+  spawnDirector: SpawnDirectorState;
+  events: SimulationEvent[];
 }
 
 export interface InputState {
@@ -63,4 +125,6 @@ export interface InputState {
   turn: number;
   fireLeft: boolean;
   fireRight: boolean;
+  interact: boolean;
+  repair: boolean;
 }

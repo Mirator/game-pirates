@@ -1,14 +1,22 @@
 export { createInitialWorldState } from "./createInitialWorldState";
-export { updateSimulation } from "./updateSimulation";
+export { closePortMenu, drainSimulationEvents, tryPurchaseHullUpgrade, updateSimulation } from "./updateSimulation";
 export * from "./constants";
 export type {
   CannonSide,
+  EnemyArchetype,
   EnemyAiState,
   EnemyState,
   InputState,
+  LootKind,
+  LootState,
   PhaseFlags,
+  PortState,
   ProjectileState,
+  SimulationEvent,
   ShipOwner,
   ShipState,
+  SpawnDirectorState,
+  UpgradeState,
+  WalletState,
   WorldState
 } from "./types";

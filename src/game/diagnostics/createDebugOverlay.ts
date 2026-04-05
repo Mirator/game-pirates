@@ -1,10 +1,14 @@
 interface DebugSnapshot {
   fps: number;
   playerHp: number;
-  enemyHp: number;
+  playerMaxHp: number;
+  enemiesAlive: number;
+  lootCount: number;
+  gold: number;
+  repairMaterials: number;
   playerReloadLeft: number;
   playerReloadRight: number;
-  enemyState: string;
+  menuOpen: boolean;
 }
 
 export interface DebugOverlay {
@@ -54,8 +58,10 @@ export function createDebugOverlay(root: HTMLElement, target: Window = window): 
 
       panel.textContent =
         `FPS ${snapshot.fps.toFixed(0)}\n` +
-        `Player HP ${snapshot.playerHp.toFixed(0)}\n` +
-        `Enemy HP ${snapshot.enemyHp.toFixed(0)} (${snapshot.enemyState})\n` +
+        `Player HP ${snapshot.playerHp.toFixed(0)} / ${snapshot.playerMaxHp.toFixed(0)}\n` +
+        `Enemies ${snapshot.enemiesAlive} | Loot ${snapshot.lootCount}\n` +
+        `Gold ${snapshot.gold} | Mats ${snapshot.repairMaterials}\n` +
+        `Menu ${snapshot.menuOpen ? "OPEN" : "CLOSED"}\n` +
         `Reload L ${formatSeconds(snapshot.playerReloadLeft)}s | R ${formatSeconds(snapshot.playerReloadRight)}s`;
     },
     dispose: () => {

@@ -1,4 +1,5 @@
-import { Group, PerspectiveCamera, Scene } from "three";
+import { ConeGeometry, Group, Mesh, MeshStandardMaterial, PerspectiveCamera, Scene, TorusGeometry } from "three";
+import { PORT_POSITION } from "../simulation";
 import { createCamera } from "./app/createCamera";
 import { createScene } from "./app/createScene";
 import { createEnvironment } from "./objects/createEnvironment";
@@ -18,12 +19,44 @@ export function createRenderWorld(): RenderWorld {
   const environment = createEnvironment(scene);
 
   const playerMesh = createShipMesh("#7a3f1f", "#f6ecce");
-  const enemyMesh = createShipMesh("#4e2d24", "#d9d0b2");
   scene.add(playerMesh);
-  scene.add(enemyMesh);
+
+  const enemyRoot = new Group();
+  scene.add(enemyRoot);
 
   const projectileRoot = new Group();
   scene.add(projectileRoot);
+
+  const lootRoot = new Group();
+  scene.add(lootRoot);
+
+  const portBeacon = new Group();
+  const beaconCore = new Mesh(
+    new ConeGeometry(1.3, 3.8, 8),
+    new MeshStandardMaterial({
+      color: "#f0c16f",
+      emissive: "#9c6a28",
+      emissiveIntensity: 0.18,
+      flatShading: true,
+      roughness: 0.42
+    })
+  );
+  beaconCore.position.y = 2.2;
+  portBeacon.add(beaconCore);
+
+  const beaconRing = new Mesh(
+    new TorusGeometry(2.1, 0.16, 8, 22),
+    new MeshStandardMaterial({
+      color: "#f9e2a3",
+      roughness: 0.24,
+      metalness: 0.2
+    })
+  );
+  beaconRing.rotation.x = Math.PI * 0.5;
+  beaconRing.position.y = 0.34;
+  portBeacon.add(beaconRing);
+  portBeacon.position.set(PORT_POSITION.x, 0, PORT_POSITION.z);
+  scene.add(portBeacon);
 
   return {
     scene,
@@ -32,10 +65,13 @@ export function createRenderWorld(): RenderWorld {
       scene,
       camera,
       playerMesh,
-      enemyMesh,
+      enemyRoot,
+      enemyMeshes: new Map(),
       environment,
       projectileRoot,
-      projectileMeshes: new Map()
+      projectileMeshes: new Map(),
+      lootRoot,
+      lootMeshes: new Map()
     }
   };
 }
