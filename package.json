@@ -1,0 +1,30 @@
+{
+  "name": "game-pirates",
+  "version": "1.0.0",
+  "description": "Blackwake Isles - Phase 1 prototype",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "tsc --noEmit && vite build",
+    "preview": "vite preview",
+    "test": "vitest run"
+  },
+  "keywords": [
+    "threejs",
+    "game",
+    "pirates",
+    "prototype"
+  ],
+  "author": "Miroslav Pavelek",
+  "license": "ISC",
+  "devDependencies": {
+    "@types/node": "^25.5.2",
+    "@types/three": "^0.183.1",
+    "typescript": "^6.0.2",
+    "vite": "^8.0.3",
+    "vitest": "^4.1.2"
+  },
+  "dependencies": {
+    "three": "^0.183.2"
+  }
+}
