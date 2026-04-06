@@ -35,6 +35,8 @@ const { renderer } = rendererContext;
 
 const debugOverlay = createDebugOverlay(app, window);
 const audioSystem = createAudioSystem(window);
+
+let uiLocked = false;
 const hud = createHud(app, {
   onUpgradeRequest: () => {
     if (tryPurchaseHullUpgrade(worldState)) {
@@ -49,6 +51,9 @@ const hud = createHud(app, {
   onCloseDockMenu: () => {
     closePortMenu(worldState);
     audioSystem.handleEvents(drainSimulationEvents(worldState));
+  },
+  onUiLockChange: (locked) => {
+    uiLocked = locked;
   }
 });
 
@@ -60,12 +65,16 @@ const loop = createLoop({
   fixedStep: FIXED_TIME_STEP,
   maxFrameDelta: MAX_FRAME_DT,
   update: (dt) => {
-    updateSimulation(worldState, inputController.state, dt);
+    if (!uiLocked) {
+      updateSimulation(worldState, inputController.state, dt);
+    }
+
+    // Avoid queued one-frame actions (Space/R) firing after menus close.
     inputController.consumeFrameFlags();
 
     audioSystem.syncMusic({
       combatIntensity: worldState.combatIntensity,
-      menuOpen: worldState.port.menuOpen,
+      menuOpen: worldState.port.menuOpen || uiLocked,
       activeEvent: worldState.eventDirector.activeKind,
       stormActive: worldState.storm.active
     });
@@ -98,7 +107,7 @@ const loop = createLoop({
       playerReloadRight: worldState.player.reload.right,
       burstActive: worldState.burst.active,
       burstCooldown: worldState.burst.cooldown,
-      menuOpen: worldState.port.menuOpen,
+      menuOpen: worldState.port.menuOpen || uiLocked,
       activeEvent: worldState.eventDirector.activeKind ?? "none",
       combatIntensity: worldState.combatIntensity,
       stormActive: worldState.storm.active
