@@ -22,6 +22,14 @@ Arcade-first handling requirements:
 - Waves primarily visual, not heavy physics simulation.
 - Optional light wind modifier.
 
+### World Boundary Behavior
+
+- The playable sea is bounded by a circular world radius.
+- Player ship uses a soft bounce at the boundary:
+  clamp position to the boundary, reflect heading only when moving outward,
+  and damp speed and drift.
+- Enemy ships may keep a simpler inward correction to preserve AI stability.
+
 Reasoning: realistic sailing simulation is high complexity and low leverage for
 MVP fun.
 

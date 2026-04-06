@@ -35,6 +35,8 @@ Even in singleplayer, organize systems as if networking will be added later.
 - Do not place gameplay logic inside camera code.
 - Avoid DOM-driven authoritative game state.
 - Prefer component and system style organization with ECS-style entity tables.
+- Reserve a dedicated ECS player entity ID (`0`) that cannot be used by enemy entities.
+- During ECS sync, detect player/enemy entity ID collisions, skip colliding enemy writes, and log an explicit error.
 
 ## ECS System Order
 
