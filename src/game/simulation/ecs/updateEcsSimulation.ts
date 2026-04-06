@@ -272,7 +272,7 @@ function applyStormPenalty(worldState: WorldWithEcs, ship: ShipState, dt: number
   ship.drift *= clamp(1 - storm.intensity * 1.1 * dt, 0.6, 1);
 }
 
-function keepShipInBounds(ship: ShipState, boundsRadius: number): void {
+function keepShipInBoundsHard(ship: ShipState, boundsRadius: number): void {
   const distSq = ship.position.x * ship.position.x + ship.position.z * ship.position.z;
   if (distSq <= boundsRadius * boundsRadius) {
     return;
@@ -284,6 +284,46 @@ function keepShipInBounds(ship: ShipState, boundsRadius: number): void {
   ship.speed *= 0.45;
   ship.drift *= 0.3;
   ship.heading = normalizeAngle(Math.atan2(-ship.position.x, -ship.position.z));
+}
+
+function keepPlayerInBoundsSoft(ship: ShipState, boundsRadius: number): void {
+  const distSq = ship.position.x * ship.position.x + ship.position.z * ship.position.z;
+  if (distSq <= boundsRadius * boundsRadius) {
+    return;
+  }
+
+  const distance = Math.sqrt(distSq);
+  if (distance < 0.0001) {
+    return;
+  }
+
+  const normalX = ship.position.x / distance;
+  const normalZ = ship.position.z / distance;
+  const clampedDistance = Math.max(0, boundsRadius - 0.001);
+  ship.position.x = normalX * clampedDistance;
+  ship.position.z = normalZ * clampedDistance;
+
+  const forward = calculateForward(ship.heading);
+  const left = calculateLeft(ship.heading);
+  const velocityX = forward.x * ship.speed + left.x * ship.drift;
+  const velocityZ = forward.z * ship.speed + left.z * ship.drift;
+  const outwardVelocity = velocityX * normalX + velocityZ * normalZ;
+  if (outwardVelocity <= 0) {
+    ship.speed *= 0.92;
+    ship.drift *= 0.8;
+    return;
+  }
+
+  const forwardDotNormal = forward.x * normalX + forward.z * normalZ;
+  const reflectedForwardX = forward.x - 2 * forwardDotNormal * normalX;
+  const reflectedForwardZ = forward.z - 2 * forwardDotNormal * normalZ;
+  const reflectedLength = Math.hypot(reflectedForwardX, reflectedForwardZ);
+  if (reflectedLength > 0.0001) {
+    ship.heading = normalizeAngle(Math.atan2(reflectedForwardX / reflectedLength, reflectedForwardZ / reflectedLength));
+  }
+
+  ship.speed *= 0.55;
+  ship.drift *= 0.45;
 }
 
 function chooseSpawnArchetype(worldState: WorldWithEcs): EnemyArchetype {
@@ -1117,7 +1157,7 @@ export function updateEcsSimulation(worldState: WorldWithEcs, inputState: InputS
   if (worldState.player.status === "alive") {
     const playerTuning = getPlayerMovementTuning(worldState);
     moveShip(worldState.player, inputState.throttle, inputState.turn, dt, playerTuning);
-    keepShipInBounds(worldState.player, worldState.boundsRadius);
+    keepPlayerInBoundsSoft(worldState.player, worldState.boundsRadius);
   }
 
   for (const enemy of ecs.enemyTable.values()) {
@@ -1126,7 +1166,7 @@ export function updateEcsSimulation(worldState: WorldWithEcs, inputState: InputS
     }
     const intent = enemyIntents.get(enemy.id) ?? { throttle: 0, turn: 0, fireSide: null };
     moveShip(enemy, intent.throttle, intent.turn, dt, ENEMY_PROFILES[enemy.archetype].movement);
-    keepShipInBounds(enemy, worldState.boundsRadius);
+    keepShipInBoundsHard(enemy, worldState.boundsRadius);
   }
 
   // 5) storm effects

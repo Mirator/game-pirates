@@ -2,6 +2,7 @@
 import {
   CANNON_RELOAD_TIME,
   ENEMY_INITIAL_SPAWN_DELAY,
+  ENEMY_SPAWN_POINTS,
   ENEMY_STAGGER_SPAWN_DELAY,
   FIXED_TIME_STEP,
   PORT_POSITION,
@@ -37,6 +38,13 @@ function stepUntil(worldState: WorldState, predicate: () => boolean, maxSteps: n
     }
     updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
   }
+}
+
+function normalizeAngle(angle: number): number {
+  let wrapped = angle;
+  while (wrapped > Math.PI) wrapped -= Math.PI * 2;
+  while (wrapped < -Math.PI) wrapped += Math.PI * 2;
+  return wrapped;
 }
 
 function quietWorld(worldState: WorldState): void {
@@ -115,6 +123,69 @@ describe("updateSimulation ECS pipeline", () => {
 
     stepUntil(worldState, () => worldState.enemies.length === 3, staggerSteps + 2);
     expect(worldState.enemies.length).toBe(3);
+  });
+
+  it("keeps player entity separate from enemies after first spawn", () => {
+    const worldState = createInitialWorldState();
+    worldState.eventDirector.timer = 999;
+
+    step(worldState, neutralInput, Math.ceil(ENEMY_INITIAL_SPAWN_DELAY / FIXED_TIME_STEP) + 2);
+
+    expect(worldState.enemies.length).toBeGreaterThan(0);
+    expect(worldState.player.owner).toBe("player");
+    expect(worldState.enemies.includes(worldState.player as unknown as (typeof worldState.enemies)[number])).toBe(false);
+  });
+
+  it("does not relocate player to enemy spawn points on neutral input", () => {
+    const worldState = createInitialWorldState();
+    worldState.eventDirector.timer = 999;
+    worldState.storm.active = false;
+
+    const startX = worldState.player.position.x;
+    const startZ = worldState.player.position.z;
+    step(worldState, neutralInput, Math.ceil(ENEMY_INITIAL_SPAWN_DELAY / FIXED_TIME_STEP) + 6);
+
+    expect(worldState.enemies.length).toBeGreaterThan(0);
+    expect(Math.hypot(worldState.player.position.x - startX, worldState.player.position.z - startZ)).toBeLessThan(0.01);
+
+    for (const spawn of ENEMY_SPAWN_POINTS) {
+      const distanceToSpawn = Math.hypot(worldState.player.position.x - spawn.x, worldState.player.position.z - spawn.z);
+      expect(distanceToSpawn).toBeGreaterThan(8);
+    }
+  });
+
+  it("soft-bounces the player at world bounds without hard-snapping heading", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    worldState.player.position.x = 62;
+    worldState.player.position.z = 72.5;
+    worldState.player.heading = 0.2;
+    worldState.player.speed = 14;
+    worldState.player.drift = 2;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+
+    const player = worldState.player;
+    const distanceFromCenter = Math.hypot(player.position.x, player.position.z);
+    expect(distanceFromCenter).toBeLessThanOrEqual(worldState.boundsRadius + 1e-6);
+    expect(Math.abs(player.speed)).toBeLessThan(14);
+    expect(Math.abs(player.drift)).toBeLessThan(2);
+
+    const headingToCenter = Math.atan2(-player.position.x, -player.position.z);
+    const snapDelta = Math.abs(normalizeAngle(player.heading - headingToCenter));
+    expect(snapDelta).toBeGreaterThan(0.1);
+
+    const normalX = player.position.x / distanceFromCenter;
+    const normalZ = player.position.z / distanceFromCenter;
+    const forwardX = Math.sin(player.heading);
+    const forwardZ = Math.cos(player.heading);
+    const leftX = -forwardZ;
+    const leftZ = forwardX;
+    const velocityX = forwardX * player.speed + leftX * player.drift;
+    const velocityZ = forwardZ * player.speed + leftZ * player.drift;
+    const outwardVelocity = velocityX * normalX + velocityZ * normalZ;
+    expect(outwardVelocity).toBeLessThanOrEqual(0.05);
   });
 
   it("sinks enemies, drops expanded loot, and removes sunk enemy after timer", () => {

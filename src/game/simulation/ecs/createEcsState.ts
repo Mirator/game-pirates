@@ -1,7 +1,13 @@
 import type { EnemyState, WorldState } from "../types";
 import type { EcsState, WorldWithEcs } from "./types";
 
-const PLAYER_ENTITY_ID = 1;
+const PLAYER_ENTITY_ID = 0;
+
+function logEntityIdCollision(enemyId: number, playerEntityId: number): void {
+  console.error(
+    `[ECS] Enemy entity id ${enemyId} collides with reserved player entity id ${playerEntityId}; ignoring enemy entry.`
+  );
+}
 
 export function createEcsState(worldState: WorldState): EcsState {
   const shipTable = new Map<number, WorldState["player"]>();
@@ -9,6 +15,10 @@ export function createEcsState(worldState: WorldState): EcsState {
 
   const enemyTable = new Map<number, EnemyState>();
   for (const enemy of worldState.enemies) {
+    if (enemy.id === PLAYER_ENTITY_ID) {
+      logEntityIdCollision(enemy.id, PLAYER_ENTITY_ID);
+      continue;
+    }
     enemyTable.set(enemy.id, enemy);
     shipTable.set(enemy.id, enemy);
   }
@@ -44,6 +54,10 @@ export function syncEcsFromWorldView(worldState: WorldWithEcs, ecs: EcsState): v
 
   const worldEnemyIds = new Set<number>();
   for (const enemy of worldState.enemies) {
+    if (enemy.id === ecs.playerEntityId) {
+      logEntityIdCollision(enemy.id, ecs.playerEntityId);
+      continue;
+    }
     worldEnemyIds.add(enemy.id);
     ecs.enemyTable.set(enemy.id, enemy);
     ecs.shipTable.set(enemy.id, enemy);
