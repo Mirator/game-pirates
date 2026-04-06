@@ -2,7 +2,16 @@ import "./style.css";
 import { createAudioSystem } from "./game/audio";
 import { createDebugOverlay } from "./game/diagnostics";
 import { createInputState } from "./game/input";
-import { createLoop, createRenderer, createRenderWorld, syncRenderFromSimulation } from "./game/render";
+import {
+  createLoop,
+  createRenderer,
+  createRenderWorld,
+  syncRenderFromSimulation,
+  type RenderInterpolationContext,
+  type RenderPositionSnapshot,
+  type RenderPreviousSnapshot,
+  type RenderShipSnapshot
+} from "./game/render";
 import {
   FIXED_TIME_STEP,
   MAX_FRAME_DT,
@@ -24,14 +33,15 @@ const worldState = createInitialWorldState();
 const debugWindow = window as Window & {
   __BLACKWAKE_DEBUG__?: {
     worldState: typeof worldState;
+    water?: ReturnType<typeof createRenderWorld>["bridge"]["environment"]["water"];
   };
 };
-debugWindow.__BLACKWAKE_DEBUG__ = { worldState };
 const inputController = createInputState(window);
 
 const rendererContext = createRenderer(app);
 const renderWorld = createRenderWorld();
 const { renderer } = rendererContext;
+debugWindow.__BLACKWAKE_DEBUG__ = { worldState, water: renderWorld.bridge.environment.water };
 
 const debugOverlay = createDebugOverlay(app, window);
 const audioSystem = createAudioSystem(window);
@@ -60,10 +70,135 @@ const hud = createHud(app, {
 let fpsAccumulator = 0;
 let fpsFrameCount = 0;
 let fps = 60;
+let uiRenderAccumulator = 1 / 30;
+
+const previousSnapshot: RenderPreviousSnapshot = {
+  player: {
+    x: worldState.player.position.x,
+    z: worldState.player.position.z,
+    heading: worldState.player.heading,
+    speed: worldState.player.speed,
+    drift: worldState.player.drift
+  },
+  enemies: new Map(),
+  projectiles: new Map(),
+  loot: new Map()
+};
+
+const interpolationContext: RenderInterpolationContext = {
+  alpha: 0,
+  fixedStep: FIXED_TIME_STEP,
+  previousSnapshot
+};
+
+const snapshotSeenIds = {
+  enemies: new Set<number>(),
+  projectiles: new Set<number>(),
+  loot: new Set<number>()
+};
+
+const copyShipSnapshot = (target: RenderShipSnapshot, source: typeof worldState.player): void => {
+  target.x = source.position.x;
+  target.z = source.position.z;
+  target.heading = source.heading;
+  target.speed = source.speed;
+  target.drift = source.drift;
+};
+
+const copyPositionSnapshot = (target: RenderPositionSnapshot, x: number, z: number): void => {
+  target.x = x;
+  target.z = z;
+};
+
+const capturePreviousSnapshot = (): void => {
+  copyShipSnapshot(previousSnapshot.player, worldState.player);
+
+  snapshotSeenIds.enemies.clear();
+  for (const enemy of worldState.enemies) {
+    let target = previousSnapshot.enemies.get(enemy.id);
+    if (!target) {
+      target = {
+        x: enemy.position.x,
+        z: enemy.position.z,
+        heading: enemy.heading,
+        speed: enemy.speed,
+        drift: enemy.drift
+      };
+      previousSnapshot.enemies.set(enemy.id, target);
+    } else {
+      copyShipSnapshot(target, enemy);
+    }
+    snapshotSeenIds.enemies.add(enemy.id);
+  }
+  for (const enemyId of previousSnapshot.enemies.keys()) {
+    if (!snapshotSeenIds.enemies.has(enemyId)) {
+      previousSnapshot.enemies.delete(enemyId);
+    }
+  }
+
+  snapshotSeenIds.projectiles.clear();
+  for (const projectile of worldState.projectiles) {
+    if (!projectile.active) {
+      continue;
+    }
+    let target = previousSnapshot.projectiles.get(projectile.id);
+    if (!target) {
+      target = {
+        x: projectile.position.x,
+        z: projectile.position.z
+      };
+      previousSnapshot.projectiles.set(projectile.id, target);
+    } else {
+      copyPositionSnapshot(target, projectile.position.x, projectile.position.z);
+    }
+    snapshotSeenIds.projectiles.add(projectile.id);
+  }
+  for (const projectileId of previousSnapshot.projectiles.keys()) {
+    if (!snapshotSeenIds.projectiles.has(projectileId)) {
+      previousSnapshot.projectiles.delete(projectileId);
+    }
+  }
+
+  snapshotSeenIds.loot.clear();
+  for (const loot of worldState.loot) {
+    if (!loot.active) {
+      continue;
+    }
+    let target = previousSnapshot.loot.get(loot.id);
+    if (!target) {
+      target = {
+        x: loot.position.x,
+        z: loot.position.z
+      };
+      previousSnapshot.loot.set(loot.id, target);
+    } else {
+      copyPositionSnapshot(target, loot.position.x, loot.position.z);
+    }
+    snapshotSeenIds.loot.add(loot.id);
+  }
+  for (const lootId of previousSnapshot.loot.keys()) {
+    if (!snapshotSeenIds.loot.has(lootId)) {
+      previousSnapshot.loot.delete(lootId);
+    }
+  }
+};
+
+const countAliveEnemies = (): number => {
+  let alive = 0;
+  for (const enemy of worldState.enemies) {
+    if (enemy.status === "alive") {
+      alive += 1;
+    }
+  }
+  return alive;
+};
+
+capturePreviousSnapshot();
 
 const loop = createLoop({
   fixedStep: FIXED_TIME_STEP,
   maxFrameDelta: MAX_FRAME_DT,
+  beforeFixedUpdate: capturePreviousSnapshot,
   update: (dt) => {
     if (!uiLocked) {
       updateSimulation(worldState, inputController.state, dt);
@@ -82,8 +217,9 @@ const loop = createLoop({
     const events = drainSimulationEvents(worldState);
     audioSystem.handleEvents(events);
   },
-  render: (frameDt) => {
-    syncRenderFromSimulation(worldState, renderWorld.bridge, frameDt);
+  render: (frameDt, alpha) => {
+    interpolationContext.alpha = alpha;
+    syncRenderFromSimulation(worldState, renderWorld.bridge, frameDt, interpolationContext);
 
     fpsAccumulator += frameDt;
     fpsFrameCount += 1;
@@ -93,26 +229,31 @@ const loop = createLoop({
       fpsFrameCount = 0;
     }
 
-    debugOverlay.setSnapshot({
-      fps,
-      playerHp: worldState.player.hp,
-      playerMaxHp: worldState.player.maxHp,
-      enemiesAlive: worldState.enemies.filter((enemy) => enemy.status === "alive").length,
-      lootCount: worldState.loot.length,
-      gold: worldState.wallet.gold,
-      repairMaterials: worldState.wallet.repairMaterials,
-      cargo: worldState.wallet.cargo,
-      treasureMaps: worldState.wallet.treasureMaps,
-      playerReloadLeft: worldState.player.reload.left,
-      playerReloadRight: worldState.player.reload.right,
-      burstActive: worldState.burst.active,
-      burstCooldown: worldState.burst.cooldown,
-      menuOpen: worldState.port.menuOpen || uiLocked,
-      activeEvent: worldState.eventDirector.activeKind ?? "none",
-      combatIntensity: worldState.combatIntensity,
-      stormActive: worldState.storm.active
-    });
-    hud.update(worldState);
+    uiRenderAccumulator += frameDt;
+    if (uiRenderAccumulator >= 1 / 30) {
+      uiRenderAccumulator %= 1 / 30;
+
+      debugOverlay.setSnapshot({
+        fps,
+        playerHp: worldState.player.hp,
+        playerMaxHp: worldState.player.maxHp,
+        enemiesAlive: countAliveEnemies(),
+        lootCount: worldState.loot.length,
+        gold: worldState.wallet.gold,
+        repairMaterials: worldState.wallet.repairMaterials,
+        cargo: worldState.wallet.cargo,
+        treasureMaps: worldState.wallet.treasureMaps,
+        playerReloadLeft: worldState.player.reload.left,
+        playerReloadRight: worldState.player.reload.right,
+        burstActive: worldState.burst.active,
+        burstCooldown: worldState.burst.cooldown,
+        menuOpen: worldState.port.menuOpen || uiLocked,
+        activeEvent: worldState.eventDirector.activeKind ?? "none",
+        combatIntensity: worldState.combatIntensity,
+        stormActive: worldState.storm.active
+      });
+      hud.update(worldState);
+    }
 
     if (!rendererContext.contextLost) {
       renderer.render(renderWorld.scene, renderWorld.camera);

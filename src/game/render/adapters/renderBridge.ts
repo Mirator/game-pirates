@@ -13,6 +13,32 @@ import { SINK_DURATION, type EnemyArchetype, type LootState, type ShipState, typ
 import type { EnvironmentObjects } from "../objects/createEnvironment";
 import { createShipMesh } from "../objects/createShipMesh";
 
+export interface RenderShipSnapshot {
+  x: number;
+  z: number;
+  heading: number;
+  speed: number;
+  drift: number;
+}
+
+export interface RenderPositionSnapshot {
+  x: number;
+  z: number;
+}
+
+export interface RenderPreviousSnapshot {
+  player: RenderShipSnapshot;
+  enemies: Map<number, RenderShipSnapshot>;
+  projectiles: Map<number, RenderPositionSnapshot>;
+  loot: Map<number, RenderPositionSnapshot>;
+}
+
+export interface RenderInterpolationContext {
+  alpha: number;
+  fixedStep: number;
+  previousSnapshot: RenderPreviousSnapshot;
+}
+
 export interface RenderBridgeState {
   scene: Scene;
   camera: PerspectiveCamera;
@@ -24,6 +50,25 @@ export interface RenderBridgeState {
   projectileMeshes: Map<number, Mesh>;
   lootRoot: Group;
   lootMeshes: Map<number, Mesh>;
+  seenEnemyIds: Set<number>;
+  seenProjectileIds: Set<number>;
+  seenLootIds: Set<number>;
+  cameraDesiredPosition: Vector3;
+  cameraDesiredLookTarget: Vector3;
+  cameraLookTarget: Vector3;
+  cameraSmoothedHeading: number;
+  cameraHeadingInitialized: boolean;
+  cameraLookInitialized: boolean;
+  playerPoseScratch: InterpolatedShipPose;
+  enemyPoseScratch: InterpolatedShipPose;
+}
+
+interface InterpolatedShipPose {
+  x: number;
+  z: number;
+  heading: number;
+  speed: number;
+  drift: number;
 }
 
 function createProjectileMesh(color: ColorRepresentation): Mesh {
@@ -63,16 +108,54 @@ function getEnemyPalette(archetype: EnemyArchetype): { hull: string; sail: strin
   }
 }
 
-function applyShipPose(ship: ShipState, mesh: Group, time = 0): void {
+function clamp(value: number, min: number, max: number): number {
+  return Math.min(max, Math.max(min, value));
+}
+
+function lerp(from: number, to: number, alpha: number): number {
+  return from + (to - from) * alpha;
+}
+
+function normalizeAngle(angle: number): number {
+  let wrapped = angle;
+  while (wrapped > Math.PI) wrapped -= Math.PI * 2;
+  while (wrapped < -Math.PI) wrapped += Math.PI * 2;
+  return wrapped;
+}
+
+function shortestAngleLerp(from: number, to: number, alpha: number): number {
+  const delta = normalizeAngle(to - from);
+  return normalizeAngle(from + delta * alpha);
+}
+
+function setInterpolatedShipPose(
+  ship: ShipState,
+  previous: RenderShipSnapshot | undefined,
+  alpha: number,
+  target: InterpolatedShipPose
+): void {
+  if (!previous) {
+    target.x = ship.position.x;
+    target.z = ship.position.z;
+    target.heading = ship.heading;
+    target.speed = ship.speed;
+    target.drift = ship.drift;
+    return;
+  }
+
+  target.x = lerp(previous.x, ship.position.x, alpha);
+  target.z = lerp(previous.z, ship.position.z, alpha);
+  target.heading = shortestAngleLerp(previous.heading, ship.heading, alpha);
+  target.speed = lerp(previous.speed, ship.speed, alpha);
+  target.drift = lerp(previous.drift, ship.drift, alpha);
+}
+
+function applyShipPose(ship: ShipState, pose: InterpolatedShipPose, mesh: Group, renderTime = 0): void {
   const sinkProgress = ship.status === "sinking" ? (SINK_DURATION - ship.sinkTimer) / SINK_DURATION : 0;
   const sinkOffset = -Math.max(0, sinkProgress) * 2.2;
 
-  mesh.position.set(ship.position.x, sinkOffset + Math.sin(time * 2.3 + ship.position.x * 0.04) * 0.03, ship.position.z);
-  mesh.rotation.set(0, ship.heading, ship.drift * 0.03 + sinkProgress * 0.28);
-}
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
+  mesh.position.set(pose.x, sinkOffset + Math.sin(renderTime * 2.3 + pose.x * 0.04) * 0.03, pose.z);
+  mesh.rotation.set(0, pose.heading, pose.drift * 0.03 + sinkProgress * 0.28);
 }
 
 function disposeGroup(group: Group): void {
@@ -92,12 +175,21 @@ function disposeGroup(group: Group): void {
   });
 }
 
-export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderBridgeState, frameDt: number): void {
-  bridge.environment.syncFromWorld(worldState, frameDt);
+export function syncRenderFromSimulation(
+  worldState: WorldState,
+  bridge: RenderBridgeState,
+  frameDt: number,
+  interpolation: RenderInterpolationContext
+): void {
+  const alpha = clamp(interpolation.alpha, 0, 1);
+  const renderTime = worldState.time - interpolation.fixedStep * (1 - alpha);
 
-  applyShipPose(worldState.player, bridge.playerMesh, worldState.time);
+  const playerPose = bridge.playerPoseScratch;
+  setInterpolatedShipPose(worldState.player, interpolation.previousSnapshot.player, alpha, playerPose);
+  applyShipPose(worldState.player, playerPose, bridge.playerMesh, renderTime);
 
-  const enemySeen = new Set<number>();
+  const enemySeen = bridge.seenEnemyIds;
+  enemySeen.clear();
   for (const enemy of worldState.enemies) {
     let enemyMesh = bridge.enemyMeshes.get(enemy.id);
     if (!enemyMesh) {
@@ -106,7 +198,10 @@ export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderB
       bridge.enemyRoot.add(enemyMesh);
       bridge.enemyMeshes.set(enemy.id, enemyMesh);
     }
-    applyShipPose(enemy, enemyMesh, worldState.time + enemy.id);
+
+    const enemyPose = bridge.enemyPoseScratch;
+    setInterpolatedShipPose(enemy, interpolation.previousSnapshot.enemies.get(enemy.id), alpha, enemyPose);
+    applyShipPose(enemy, enemyPose, enemyMesh, renderTime + enemy.id);
     enemySeen.add(enemy.id);
   }
 
@@ -119,7 +214,8 @@ export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderB
     bridge.enemyMeshes.delete(enemyId);
   }
 
-  const seenProjectiles = new Set<number>();
+  const seenProjectiles = bridge.seenProjectileIds;
+  seenProjectiles.clear();
   for (const projectile of worldState.projectiles) {
     if (!projectile.active) {
       continue;
@@ -132,7 +228,10 @@ export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderB
       bridge.projectileRoot.add(projectileMesh);
     }
 
-    projectileMesh.position.set(projectile.position.x, 1.06, projectile.position.z);
+    const previousProjectile = interpolation.previousSnapshot.projectiles.get(projectile.id);
+    const projectileX = previousProjectile ? lerp(previousProjectile.x, projectile.position.x, alpha) : projectile.position.x;
+    const projectileZ = previousProjectile ? lerp(previousProjectile.z, projectile.position.z, alpha) : projectile.position.z;
+    projectileMesh.position.set(projectileX, 1.06, projectileZ);
     seenProjectiles.add(projectile.id);
   }
 
@@ -146,7 +245,8 @@ export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderB
     bridge.projectileMeshes.delete(id);
   }
 
-  const seenLoot = new Set<number>();
+  const seenLoot = bridge.seenLootIds;
+  seenLoot.clear();
   for (const loot of worldState.loot) {
     if (!loot.active) {
       continue;
@@ -159,12 +259,11 @@ export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderB
       bridge.lootMeshes.set(loot.id, lootMesh);
     }
 
-    lootMesh.position.set(
-      loot.position.x,
-      0.65 + Math.sin(worldState.time * 3.6 + loot.id * 0.8) * 0.16,
-      loot.position.z
-    );
-    lootMesh.rotation.y += frameDt * 1.5;
+    const previousLoot = interpolation.previousSnapshot.loot.get(loot.id);
+    const lootX = previousLoot ? lerp(previousLoot.x, loot.position.x, alpha) : loot.position.x;
+    const lootZ = previousLoot ? lerp(previousLoot.z, loot.position.z, alpha) : loot.position.z;
+    lootMesh.position.set(lootX, 0.65 + Math.sin(renderTime * 3.6 + loot.id * 0.8) * 0.16, lootZ);
+    lootMesh.rotation.y = renderTime * 1.5 + loot.id * 0.35;
     seenLoot.add(loot.id);
   }
 
@@ -178,23 +277,62 @@ export function syncRenderFromSimulation(worldState: WorldState, bridge: RenderB
     bridge.lootMeshes.delete(id);
   }
 
-  const playerForward = {
-    x: Math.sin(worldState.player.heading),
-    z: Math.cos(worldState.player.heading)
-  };
-  const followDistance = 12 + clamp(Math.abs(worldState.player.speed) * 0.55, 0, 4.5);
-  const desiredHeight = 6.7 + clamp(Math.abs(worldState.player.speed) * 0.2, 0, 1.8);
+  const headingDeadzone = 0.03;
+  if (!bridge.cameraHeadingInitialized) {
+    bridge.cameraSmoothedHeading = Math.abs(playerPose.heading) <= headingDeadzone ? 0 : playerPose.heading;
+    bridge.cameraHeadingInitialized = true;
+  }
 
-  const desiredPosition = new Vector3(
-    worldState.player.position.x - playerForward.x * followDistance,
+  let headingDelta = normalizeAngle(playerPose.heading - bridge.cameraSmoothedHeading);
+  if (Math.abs(headingDelta) <= headingDeadzone) {
+    headingDelta = 0;
+  } else {
+    headingDelta = Math.sign(headingDelta) * (Math.abs(headingDelta) - headingDeadzone);
+  }
+  const headingFollowStrength = 1 - Math.exp(-4.8 * frameDt);
+  bridge.cameraSmoothedHeading = normalizeAngle(bridge.cameraSmoothedHeading + headingDelta * headingFollowStrength);
+
+  const cameraForwardX = Math.sin(bridge.cameraSmoothedHeading);
+  const cameraForwardZ = Math.cos(bridge.cameraSmoothedHeading);
+  const speedAbs = Math.abs(playerPose.speed);
+  const followDistance = 12 + clamp(speedAbs * 0.3, 0, 2.4);
+  const desiredHeight = 6.7 + clamp(speedAbs * 0.11, 0, 1.0);
+
+  bridge.cameraDesiredPosition.set(
+    playerPose.x - cameraForwardX * followDistance,
     desiredHeight,
-    worldState.player.position.z - playerForward.z * followDistance
+    playerPose.z - cameraForwardZ * followDistance
   );
-  const followStrength = 1 - Math.exp(-5.5 * frameDt);
-  bridge.camera.position.lerp(desiredPosition, followStrength);
-  bridge.camera.lookAt(
-    worldState.player.position.x + playerForward.x * 1.3,
-    1.5 + clamp(Math.abs(worldState.player.speed) * 0.06, 0, 0.4),
-    worldState.player.position.z + playerForward.z * 1.3
+
+  const desiredLookAhead = 1.15 + clamp(speedAbs * 0.03, 0, 0.24);
+  bridge.cameraDesiredLookTarget.set(
+    playerPose.x + cameraForwardX * desiredLookAhead,
+    1.5 + clamp(speedAbs * 0.035, 0, 0.25),
+    playerPose.z + cameraForwardZ * desiredLookAhead
   );
+
+  if (!bridge.cameraLookInitialized) {
+    bridge.cameraLookTarget.copy(bridge.cameraDesiredLookTarget);
+    bridge.cameraLookInitialized = true;
+  }
+
+  const positionFollowStrength = 1 - Math.exp(-5.2 * frameDt);
+  const lookFollowStrength = 1 - Math.exp(-3.4 * frameDt);
+
+  bridge.camera.position.lerp(bridge.cameraDesiredPosition, positionFollowStrength);
+  bridge.cameraLookTarget.lerp(bridge.cameraDesiredLookTarget, lookFollowStrength);
+  bridge.camera.lookAt(bridge.cameraLookTarget);
+
+  bridge.environment.syncFromWorld(worldState, {
+    frameDt,
+    renderTime,
+    cameraPosition: bridge.camera.position,
+    playerPose: {
+      x: playerPose.x,
+      z: playerPose.z,
+      heading: playerPose.heading,
+      speed: playerPose.speed,
+      drift: playerPose.drift
+    }
+  });
 }

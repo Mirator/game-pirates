@@ -11,13 +11,54 @@ import {
   MeshStandardMaterial,
   PlaneGeometry,
   Scene,
-  TorusGeometry
+  ShaderMaterial,
+  TorusGeometry,
+  Vector2,
+  Vector3,
+  Vector4
 } from "three";
-import type { IslandKind, IslandState, WorldState } from "../../simulation";
+import { PLAYER_MAX_FORWARD_SPEED, type IslandKind, type IslandState, type WorldState } from "../../simulation";
+import { createWaterNormalTexture } from "../water/createWaterNormalTexture";
+import { buildWaveShaderUniformState, computeWakeIntensity } from "../water/waterMath";
+import {
+  createDefaultWaterConfig,
+  getWaterQualityPreset,
+  sanitizeWaterTuning,
+  WATER_MAX_ISLANDS,
+  WATER_MAX_WAVE_COMPONENTS,
+  type WaterDebugSnapshot,
+  type WaterQualityLevel,
+  type WaterRenderConfig,
+  type WaterTuningControls
+} from "../water/waterConfig";
+
+export interface EnvironmentPlayerPose {
+  x: number;
+  z: number;
+  heading: number;
+  speed: number;
+  drift: number;
+}
+
+export interface EnvironmentSyncContext {
+  frameDt: number;
+  renderTime: number;
+  cameraPosition: {
+    x: number;
+    y: number;
+    z: number;
+  };
+  playerPose: EnvironmentPlayerPose;
+}
 
 export interface EnvironmentObjects {
   root: Group;
-  syncFromWorld: (worldState: WorldState, frameDt: number) => void;
+  syncFromWorld: (worldState: WorldState, context: EnvironmentSyncContext) => void;
+  water: {
+    getConfig: () => WaterDebugSnapshot;
+    setQuality: (quality: WaterQualityLevel) => void;
+    updateTuning: (patch: Partial<WaterTuningControls>) => void;
+  };
 }
 
 function clamp(value: number, min: number, max: number): number {
@@ -123,52 +164,333 @@ function createIslandMesh(island: IslandState): Group {
   return group;
 }
 
-export function createEnvironment(scene: Scene): EnvironmentObjects {
+function createWaterGeometry(segments: number): PlaneGeometry {
+  const geometry = new PlaneGeometry(760, 760, segments, segments);
+  geometry.rotateX(-Math.PI * 0.5);
+  return geometry;
+}
+
+const WATER_VERTEX_SHADER = `
+#define MAX_WAVES ${WATER_MAX_WAVE_COMPONENTS}
+
+uniform float uTime;
+uniform int uWaveCount;
+uniform vec2 uWaveDirections[MAX_WAVES];
+uniform float uWaveAmplitudes[MAX_WAVES];
+uniform float uWaveLengths[MAX_WAVES];
+uniform float uWaveSpeeds[MAX_WAVES];
+uniform float uWaveSteepness[MAX_WAVES];
+uniform float uWavePhases[MAX_WAVES];
+
+varying vec3 vWorldPos;
+varying vec3 vGeomNormal;
+varying vec2 vWorldUv;
+
+#include <fog_pars_vertex>
+
+vec3 displaceSurface(vec3 inPosition) {
+  vec3 displaced = inPosition;
+  for (int i = 0; i < MAX_WAVES; i += 1) {
+    if (i >= uWaveCount) {
+      continue;
+    }
+    vec2 direction = normalize(uWaveDirections[i]);
+    float wavelength = max(0.001, uWaveLengths[i]);
+    float waveNumber = 6.28318530718 / wavelength;
+    float phase = waveNumber * dot(direction, inPosition.xz) + uTime * uWaveSpeeds[i] + uWavePhases[i];
+    float amplitude = uWaveAmplitudes[i];
+    float steepness = uWaveSteepness[i];
+    float cosine = cos(phase);
+    float sine = sin(phase);
+
+    displaced.x += direction.x * (steepness * amplitude * cosine);
+    displaced.y += amplitude * sine;
+    displaced.z += direction.y * (steepness * amplitude * cosine);
+  }
+  return displaced;
+}
+
+vec3 computeDisplacedNormal(vec3 inPosition) {
+  float epsilon = 0.5;
+  vec3 center = displaceSurface(inPosition);
+  vec3 offsetX = displaceSurface(inPosition + vec3(epsilon, 0.0, 0.0));
+  vec3 offsetZ = displaceSurface(inPosition + vec3(0.0, 0.0, epsilon));
+  vec3 tangentX = offsetX - center;
+  vec3 tangentZ = offsetZ - center;
+  return normalize(cross(tangentZ, tangentX));
+}
+
+void main() {
+  vec3 displaced = displaceSurface(position);
+  vec3 objectNormal = computeDisplacedNormal(position);
+  vec4 worldPosition = modelMatrix * vec4(displaced, 1.0);
+
+  vWorldPos = worldPosition.xyz;
+  vGeomNormal = normalize(mat3(modelMatrix) * objectNormal);
+  vWorldUv = worldPosition.xz;
+
+  vec4 mvPosition = viewMatrix * worldPosition;
+  gl_Position = projectionMatrix * mvPosition;
+  #include <fog_vertex>
+}
+`;
+
+const WATER_FRAGMENT_SHADER = `
+#define MAX_ISLANDS ${WATER_MAX_ISLANDS}
+
+uniform float uTime;
+uniform vec3 uCameraPos;
+uniform vec3 uSunDirection;
+uniform vec3 uDeepColor;
+uniform vec3 uShallowColor;
+uniform vec3 uStormColor;
+uniform vec3 uFoamColor;
+uniform float uStormBlend;
+
+uniform sampler2D uNormalMapA;
+uniform sampler2D uNormalMapB;
+uniform vec2 uNormalScrollA;
+uniform vec2 uNormalScrollB;
+uniform float uNormalTilingA;
+uniform float uNormalTilingB;
+uniform float uNormalStrength;
+
+uniform float uFresnelStrength;
+uniform float uFresnelPower;
+uniform float uSpecularStrength;
+uniform float uSpecularExponent;
+
+uniform vec2 uPlayerPos;
+uniform vec2 uPlayerForward;
+uniform float uPlayerSpeedNorm;
+uniform float uBurstFactor;
+uniform float uWakeIntensity;
+uniform float uWakeLength;
+uniform float uWakeWidth;
+uniform float uFoamThreshold;
+
+uniform int uShorelineEnabled;
+uniform int uIslandCount;
+uniform vec4 uIslandData[MAX_ISLANDS];
+uniform float uShorelineStrength;
+
+varying vec3 vWorldPos;
+varying vec3 vGeomNormal;
+varying vec2 vWorldUv;
+
+#include <fog_pars_fragment>
+
+vec3 decodeNormal(vec3 encoded) {
+  return normalize(encoded * 2.0 - 1.0);
+}
+
+float computeShorelineMask() {
+  if (uShorelineEnabled == 0) {
+    return 0.0;
+  }
+
+  float mask = 0.0;
+  for (int i = 0; i < MAX_ISLANDS; i += 1) {
+    if (i >= uIslandCount) {
+      continue;
+    }
+    vec4 island = uIslandData[i];
+    float islandDistance = distance(vWorldPos.xz, island.xy);
+    float islandMask = 1.0 - smoothstep(island.z, island.w, islandDistance);
+    mask = max(mask, islandMask);
+  }
+  return mask * uShorelineStrength;
+}
+
+void main() {
+  vec2 uvA = vWorldUv * uNormalTilingA + uTime * uNormalScrollA;
+  vec2 uvB = vWorldUv * uNormalTilingB + uTime * uNormalScrollB;
+
+  vec3 normalA = decodeNormal(texture2D(uNormalMapA, uvA).xyz);
+  vec3 normalB = decodeNormal(texture2D(uNormalMapB, uvB).xyz);
+  vec3 detailNormal = normalize(vec3(normalA.x + normalB.x, 1.0, normalA.z + normalB.z));
+
+  vec3 surfaceNormal = normalize(vGeomNormal + vec3(detailNormal.x, detailNormal.y * 0.12, detailNormal.z) * uNormalStrength);
+  vec3 viewDirection = normalize(uCameraPos - vWorldPos);
+  vec3 sunDirection = normalize(uSunDirection);
+
+  float shorelineMask = computeShorelineMask();
+
+  vec2 forward = normalize(uPlayerForward);
+  vec2 toFragment = vWorldPos.xz - uPlayerPos;
+  float behindShip = max(0.0, dot(toFragment, -forward));
+  vec2 right = vec2(-forward.y, forward.x);
+  float lateralDistance = abs(dot(toFragment, right));
+
+  float wakeTrail = smoothstep(0.0, uWakeLength, behindShip) * (1.0 - smoothstep(uWakeWidth, uWakeWidth * 1.85, lateralDistance));
+  wakeTrail *= step(0.05, behindShip);
+  float hullDisturbance = 1.0 - smoothstep(uWakeWidth * 0.45, uWakeWidth * 1.7, length(toFragment));
+  float wakeFactor = (wakeTrail * 0.8 + hullDisturbance * 0.65) * uWakeIntensity * uPlayerSpeedNorm * (1.0 + uBurstFactor * 0.45);
+  float foamFactor = smoothstep(uFoamThreshold, 1.0, wakeFactor);
+
+  vec3 baseColor = mix(uDeepColor, uShallowColor, clamp(shorelineMask + wakeFactor * 0.2, 0.0, 1.0));
+  baseColor = mix(baseColor, uStormColor, clamp(uStormBlend, 0.0, 1.0) * 0.72);
+
+  float ndv = max(0.0, dot(surfaceNormal, viewDirection));
+  float fresnel = pow(1.0 - ndv, max(0.1, uFresnelPower)) * uFresnelStrength;
+  vec3 halfVector = normalize(viewDirection + sunDirection);
+  float specular = pow(max(dot(surfaceNormal, halfVector), 0.0), uSpecularExponent) * uSpecularStrength;
+
+  vec3 finalColor = baseColor;
+  finalColor += fresnel * vec3(0.3, 0.46, 0.62);
+  finalColor += specular * vec3(1.0, 0.95, 0.84);
+  finalColor = mix(finalColor, uFoamColor, clamp(foamFactor, 0.0, 1.0));
+
+  gl_FragColor = vec4(finalColor, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+  #include <fog_fragment>
+}
+`;
+
+export function createEnvironment(scene: Scene, configuredWater: WaterRenderConfig = createDefaultWaterConfig()): EnvironmentObjects {
   const root = new Group();
   scene.add(root);
+
+  const defaultWaterConfig = createDefaultWaterConfig();
+  let waterConfig: WaterRenderConfig = {
+    quality: configuredWater.quality ?? defaultWaterConfig.quality,
+    tuning: sanitizeWaterTuning(configuredWater.tuning, defaultWaterConfig.tuning)
+  };
+  let waterPreset = getWaterQualityPreset(waterConfig.quality);
 
   const calmFogColor = new Color("#8fd4ff");
   const stormFogColor = new Color("#6a8599");
   const calmBackground = new Color("#8fd4ff");
   const stormBackground = new Color("#6c8aa0");
-  const calmWaterColor = new Color("#1d6d9f");
-  const stormWaterColor = new Color("#26506f");
+  const stormWaterColor = new Color("#264f6b");
   const workingColor = new Color();
 
-  const waterGeometry = new PlaneGeometry(280, 280, 60, 60);
-  waterGeometry.rotateX(-Math.PI * 0.5);
+  const waveDirections = Array.from({ length: WATER_MAX_WAVE_COMPONENTS }, () => new Vector2(1, 0));
+  const islandData = Array.from({ length: WATER_MAX_ISLANDS }, () => new Vector4(0, 0, 0, 0));
+  const normalMapA = createWaterNormalTexture(128, 11.3);
+  const normalMapB = createWaterNormalTexture(128, 29.7);
 
-  const positionAttribute = waterGeometry.getAttribute("position");
-  if (!positionAttribute) {
-    throw new Error("Water geometry is missing its position attribute.");
-  }
-  const waterPositions = positionAttribute.array as Float32Array;
-  const baseWaterHeights = new Float32Array(waterPositions.length);
-  for (let i = 0; i < waterPositions.length; i += 3) {
-    baseWaterHeights[i] = waterPositions[i] ?? 0;
-    baseWaterHeights[i + 1] = waterPositions[i + 1] ?? 0;
-    baseWaterHeights[i + 2] = waterPositions[i + 2] ?? 0;
-  }
+  const waterUniforms = {
+    uTime: { value: 0 },
+    uWaveCount: { value: 0 },
+    uWaveDirections: { value: waveDirections },
+    uWaveAmplitudes: { value: [0, 0, 0, 0] },
+    uWaveLengths: { value: [1, 1, 1, 1] },
+    uWaveSpeeds: { value: [0, 0, 0, 0] },
+    uWaveSteepness: { value: [0, 0, 0, 0] },
+    uWavePhases: { value: [0, 0, 0, 0] },
+    uCameraPos: { value: new Vector3(0, 6, -12) },
+    uSunDirection: { value: new Vector3(22, 40, 10).normalize() },
+    uDeepColor: { value: new Color(waterConfig.tuning.deepColor) },
+    uShallowColor: { value: new Color(waterConfig.tuning.shallowColor) },
+    uStormColor: { value: stormWaterColor.clone() },
+    uFoamColor: { value: new Color("#d2f4ff") },
+    uStormBlend: { value: 0 },
+    uNormalMapA: { value: normalMapA },
+    uNormalMapB: { value: normalMapB },
+    uNormalScrollA: { value: new Vector2() },
+    uNormalScrollB: { value: new Vector2() },
+    uNormalTilingA: { value: 0.06 },
+    uNormalTilingB: { value: 0.12 },
+    uNormalStrength: { value: 0.35 },
+    uFresnelStrength: { value: 1.1 },
+    uFresnelPower: { value: 4.4 },
+    uSpecularStrength: { value: 0.6 },
+    uSpecularExponent: { value: 40 },
+    uPlayerPos: { value: new Vector2(0, 0) },
+    uPlayerForward: { value: new Vector2(0, 1) },
+    uPlayerSpeedNorm: { value: 0 },
+    uBurstFactor: { value: 0 },
+    uWakeIntensity: { value: 0.9 },
+    uWakeLength: { value: 22 },
+    uWakeWidth: { value: 2.2 },
+    uFoamThreshold: { value: waterConfig.tuning.foamThreshold },
+    uShorelineEnabled: { value: 1 },
+    uIslandCount: { value: 0 },
+    uIslandData: { value: islandData },
+    uShorelineStrength: { value: 1 },
+    fogColor: { value: calmFogColor.clone() },
+    fogNear: { value: 70 },
+    fogFar: { value: 190 },
+    fogDensity: { value: 0.00025 }
+  };
 
-  const waterMaterial = new MeshStandardMaterial({
-    color: calmWaterColor,
-    flatShading: true,
-    roughness: 0.34,
-    metalness: 0.02
+  const waterMaterial = new ShaderMaterial({
+    uniforms: waterUniforms,
+    vertexShader: WATER_VERTEX_SHADER,
+    fragmentShader: WATER_FRAGMENT_SHADER,
+    fog: true
   });
-  const water = new Mesh(waterGeometry, waterMaterial);
+  const water = new Mesh(createWaterGeometry(waterPreset.geometrySegments), waterMaterial);
+  water.position.y = 0;
   root.add(water);
 
-  const shallowRingMaterial = new MeshStandardMaterial({
-    color: "#3f95bb",
-    transparent: true,
-    opacity: 0.45,
-    roughness: 0.22
-  });
-  const shallowRing = new Mesh(new CircleGeometry(42, 24), shallowRingMaterial);
-  shallowRing.rotation.x = -Math.PI * 0.5;
-  shallowRing.position.y = 0.04;
-  root.add(shallowRing);
+  const applyWaterConfig = (rebuildGeometry: boolean): void => {
+    waterPreset = getWaterQualityPreset(waterConfig.quality);
+    const waveState = buildWaveShaderUniformState(waterPreset.waveComponents, waterConfig.tuning);
+    const waveCount = Math.min(WATER_MAX_WAVE_COMPONENTS, waterPreset.waveComponents.length);
+    waterUniforms.uWaveCount.value = waveCount;
+
+    const amplitudes = [0, 0, 0, 0];
+    const wavelengths = [1, 1, 1, 1];
+    const speeds = [0, 0, 0, 0];
+    const steepness = [0, 0, 0, 0];
+    const phases = [0, 0, 0, 0];
+    for (let i = 0; i < WATER_MAX_WAVE_COMPONENTS; i += 1) {
+      const direction = waveState.directions[i] ?? [1, 0];
+      const waveDirection = waterUniforms.uWaveDirections.value[i];
+      waveDirection?.set(direction[0], direction[1]);
+      amplitudes[i] = waveState.amplitudes[i] ?? 0;
+      wavelengths[i] = waveState.wavelengths[i] ?? 1;
+      speeds[i] = waveState.speeds[i] ?? 0;
+      steepness[i] = waveState.steepness[i] ?? 0;
+      phases[i] = waveState.phases[i] ?? 0;
+    }
+
+    waterUniforms.uWaveAmplitudes.value = amplitudes;
+    waterUniforms.uWaveLengths.value = wavelengths;
+    waterUniforms.uWaveSpeeds.value = speeds;
+    waterUniforms.uWaveSteepness.value = steepness;
+    waterUniforms.uWavePhases.value = phases;
+
+    waterUniforms.uNormalStrength.value = waterPreset.normalStrength;
+    waterUniforms.uNormalTilingA.value = waterPreset.normalTilingA;
+    waterUniforms.uNormalTilingB.value = waterPreset.normalTilingB;
+    waterUniforms.uNormalScrollA.value.set(
+      waterPreset.normalScrollA[0] * waterConfig.tuning.normalScrollSpeedA,
+      waterPreset.normalScrollA[1] * waterConfig.tuning.normalScrollSpeedA
+    );
+    waterUniforms.uNormalScrollB.value.set(
+      waterPreset.normalScrollB[0] * waterConfig.tuning.normalScrollSpeedB,
+      waterPreset.normalScrollB[1] * waterConfig.tuning.normalScrollSpeedB
+    );
+
+    waterUniforms.uFresnelStrength.value = waterPreset.fresnelStrength * waterConfig.tuning.fresnelStrength;
+    waterUniforms.uFresnelPower.value = waterPreset.fresnelPower;
+    waterUniforms.uSpecularStrength.value = waterPreset.specularStrength;
+    waterUniforms.uSpecularExponent.value = waterPreset.specularExponent;
+    waterUniforms.uWakeIntensity.value = waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity;
+    waterUniforms.uWakeLength.value = waterPreset.wakeLength;
+    waterUniforms.uWakeWidth.value = waterPreset.wakeWidth;
+    waterUniforms.uFoamThreshold.value = waterConfig.tuning.foamThreshold;
+    waterUniforms.uShorelineEnabled.value = waterPreset.shorelineEnabled ? 1 : 0;
+    waterUniforms.uShorelineStrength.value = waterPreset.shorelineStrength;
+    waterUniforms.uDeepColor.value.set(waterConfig.tuning.deepColor);
+    waterUniforms.uShallowColor.value.set(waterConfig.tuning.shallowColor);
+
+    if (rebuildGeometry) {
+      const currentGeometry = water.geometry as PlaneGeometry;
+      const currentSegments = currentGeometry.parameters.widthSegments;
+      if (currentSegments !== waterPreset.geometrySegments) {
+        const oldGeometry = water.geometry;
+        water.geometry = createWaterGeometry(waterPreset.geometrySegments);
+        oldGeometry.dispose();
+      }
+    }
+  };
+
+  applyWaterConfig(false);
 
   const islandsRoot = new Group();
   root.add(islandsRoot);
@@ -246,7 +568,7 @@ export function createEnvironment(scene: Scene): EnvironmentObjects {
       })
     );
     const angle = (i / 12) * Math.PI * 2;
-    cloud.position.set(Math.cos(angle) * 0.84, 0.18 + ((i % 3) * 0.04), Math.sin(angle) * 0.84);
+    cloud.position.set(Math.cos(angle) * 0.84, 0.18 + (i % 3) * 0.04, Math.sin(angle) * 0.84);
     cloud.rotation.y = angle + Math.PI * 0.5;
     stormClouds.add(cloud);
   }
@@ -258,17 +580,73 @@ export function createEnvironment(scene: Scene): EnvironmentObjects {
 
   return {
     root,
-    syncFromWorld: (worldState, frameDt) => {
-      for (let i = 0; i < waterPositions.length; i += 3) {
-        const baseX = baseWaterHeights[i] ?? 0;
-        const baseZ = baseWaterHeights[i + 2] ?? 0;
-        const waveA = Math.sin(baseX * 0.06 + worldState.time * 1.24) * 0.17;
-        const waveB = Math.cos(baseZ * 0.05 + worldState.time * 0.92) * 0.14;
-        waterPositions[i + 1] = waveA + waveB;
+    water: {
+      getConfig: () => ({
+        quality: waterConfig.quality,
+        activeWaveCount: getWaterQualityPreset(waterConfig.quality).waveComponents.length,
+        waveAmplitude: waterConfig.tuning.waveAmplitude,
+        wavelength: waterConfig.tuning.wavelength,
+        waveSpeed: waterConfig.tuning.waveSpeed,
+        normalScrollSpeedA: waterConfig.tuning.normalScrollSpeedA,
+        normalScrollSpeedB: waterConfig.tuning.normalScrollSpeedB,
+        deepColor: waterConfig.tuning.deepColor,
+        shallowColor: waterConfig.tuning.shallowColor,
+        fresnelStrength: waterConfig.tuning.fresnelStrength,
+        wakeIntensity: waterConfig.tuning.wakeIntensity,
+        foamThreshold: waterConfig.tuning.foamThreshold
+      }),
+      setQuality: (quality) => {
+        if (quality === waterConfig.quality) {
+          return;
+        }
+        waterConfig = {
+          ...waterConfig,
+          quality
+        };
+        applyWaterConfig(true);
+      },
+      updateTuning: (patch) => {
+        waterConfig = {
+          ...waterConfig,
+          tuning: sanitizeWaterTuning(patch, waterConfig.tuning)
+        };
+        applyWaterConfig(false);
       }
-      positionAttribute.needsUpdate = true;
+    },
+    syncFromWorld: (worldState, context) => {
+      water.position.set(context.cameraPosition.x, 0, context.cameraPosition.z);
+      waterUniforms.uTime.value = context.renderTime;
+      waterUniforms.uCameraPos.value.set(context.cameraPosition.x, context.cameraPosition.y, context.cameraPosition.z);
+      waterUniforms.uPlayerPos.value.set(context.playerPose.x, context.playerPose.z);
+      waterUniforms.uPlayerForward.value.set(Math.sin(context.playerPose.heading), Math.cos(context.playerPose.heading));
+      waterUniforms.uPlayerSpeedNorm.value = computeWakeIntensity(
+        context.playerPose.speed,
+        PLAYER_MAX_FORWARD_SPEED,
+        worldState.burst.active,
+        1
+      );
+      waterUniforms.uBurstFactor.value = worldState.burst.active ? 1 : 0;
 
-      shallowRing.rotation.z = worldState.time * 0.025;
+      let islandCount = 0;
+      for (let i = 0; i < WATER_MAX_ISLANDS; i += 1) {
+        const island = worldState.islands[i];
+        const data = islandData[i];
+        if (!island || !data) {
+          if (data) {
+            data.set(0, 0, 0, 0);
+          }
+          continue;
+        }
+
+        data.set(
+          island.position.x,
+          island.position.z,
+          island.radius,
+          island.radius * waterPreset.shorelineRadiusScale
+        );
+        islandCount += 1;
+      }
+      waterUniforms.uIslandCount.value = islandCount;
 
       const seenIslands = new Set<number>();
       for (const island of worldState.islands) {
@@ -295,10 +673,10 @@ export function createEnvironment(scene: Scene): EnvironmentObjects {
         treasureBeacon.visible = true;
         treasureBeacon.position.set(worldState.treasureObjective.markerPosition.x, 0, worldState.treasureObjective.markerPosition.z);
 
-        const pulse = 0.72 + Math.sin(worldState.time * 2.7) * 0.14;
+        const pulse = 0.72 + Math.sin(context.renderTime * 2.7) * 0.14;
         treasureBeam.scale.set(1, pulse, 1);
-        treasureBeamMaterial.opacity = 0.32 + Math.sin(worldState.time * 2.2) * 0.08;
-        treasureRing.rotation.z += frameDt * 1.6;
+        treasureBeamMaterial.opacity = 0.32 + Math.sin(context.renderTime * 2.2) * 0.08;
+        treasureRing.rotation.z = context.renderTime * 1.6;
       } else {
         treasureBeacon.visible = false;
       }
@@ -312,8 +690,8 @@ export function createEnvironment(scene: Scene): EnvironmentObjects {
         stormDiskMaterial.opacity = 0.13 + intensity * 0.2;
         stormRimMaterial.opacity = 0.3 + intensity * 0.24;
         stormRimMaterial.emissiveIntensity = 0.14 + intensity * 0.2;
-        stormClouds.rotation.y += frameDt * (0.34 + intensity * 0.32);
-        stormRim.rotation.z -= frameDt * 0.8;
+        stormClouds.rotation.y = context.renderTime * (0.34 + intensity * 0.32);
+        stormRim.rotation.z = -context.renderTime * 0.8;
       } else {
         stormGroup.visible = false;
       }
@@ -327,11 +705,7 @@ export function createEnvironment(scene: Scene): EnvironmentObjects {
           ? clamp(1 - stormDistance / (worldState.storm.radius * 1.4), 0, 1)
           : 0;
       const stormBlend = clamp(stormProximity * worldState.storm.intensity, 0, 1);
-
-      workingColor.copy(calmWaterColor).lerp(stormWaterColor, stormBlend);
-      waterMaterial.color.copy(workingColor);
-      waterMaterial.emissiveIntensity = 0.02 + Math.sin(worldState.time * 1.8) * 0.01 + stormBlend * 0.02;
-      shallowRingMaterial.opacity = 0.45 - stormBlend * 0.12;
+      waterUniforms.uStormBlend.value = stormBlend;
 
       if (fog) {
         workingColor.copy(calmFogColor).lerp(stormFogColor, stormBlend);

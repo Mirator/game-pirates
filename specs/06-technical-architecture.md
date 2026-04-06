@@ -37,6 +37,23 @@ Even in singleplayer, organize systems as if networking will be added later.
 - Prefer component and system style organization with ECS-style entity tables.
 - Reserve a dedicated ECS player entity ID (`0`) that cannot be used by enemy entities.
 - During ECS sync, detect player/enemy entity ID collisions, skip colliding enemy writes, and log an explicit error.
+- Run gameplay simulation on a fixed timestep and render on variable framerate.
+- Render path must interpolate between previous and current simulation snapshots,
+  rather than snapping directly to latest fixed-step state.
+- Heading interpolation must use shortest-angle blending across `-pi`/`pi`
+  boundaries to avoid rotation flips.
+
+## Render Interpolation Contract
+
+- Before each fixed simulation tick, capture a render snapshot for:
+  player, enemies, projectiles, and loot.
+- Render receives interpolation alpha in `[0, 1]` as
+  `alpha = accumulator / fixedStep`.
+- Interpolated render-time is derived as
+  `renderTime = worldTime - fixedStep * (1 - alpha)` for smooth visual
+  animation of non-authoritative effects (waves, bobbing, beacons, storm VFX).
+- Entities missing previous snapshots (spawn/despawn edges) must fall back to
+  current simulation state safely.
 
 ## ECS System Order
 

@@ -49,6 +49,10 @@ The MVP is successful when:
 - Combat is easy to understand.
 - Players have a reason to keep playing for 15 to 30 minutes.
 - Code structure clearly separates game state from rendering and UI.
+- Movement and camera feel smooth during sustained steering and throttle,
+  without visible fixed-tick freeze-jump jitter.
+- Frame pacing remains stable during active sailing/combat, including with HUD
+  and minimap visible.
 
 ## Example First 10 Minutes
 

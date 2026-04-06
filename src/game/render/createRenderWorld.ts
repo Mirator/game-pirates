@@ -1,6 +1,7 @@
-import { ConeGeometry, Group, Mesh, MeshStandardMaterial, PerspectiveCamera, Scene, TorusGeometry } from "three";
+import { ConeGeometry, Group, Mesh, MeshStandardMaterial, PerspectiveCamera, Scene, TorusGeometry, Vector3 } from "three";
 import { PORT_POSITION } from "../simulation";
 import { createCamera } from "./app/createCamera";
+import { createRenderConfig, type RenderConfigOverrides } from "./app/renderConfig";
 import { createScene } from "./app/createScene";
 import { createEnvironment } from "./objects/createEnvironment";
 import { createShipMesh } from "./objects/createShipMesh";
@@ -13,12 +14,13 @@ export interface RenderWorld {
   dispose: () => void;
 }
 
-export function createRenderWorld(): RenderWorld {
+export function createRenderWorld(overrides: RenderConfigOverrides = {}): RenderWorld {
+  const renderConfig = createRenderConfig(overrides);
   const scene = createScene();
   const cameraController = createCamera();
   const { camera } = cameraController;
 
-  const environment = createEnvironment(scene);
+  const environment = createEnvironment(scene, renderConfig.water);
 
   const playerMesh = createShipMesh("#7a3f1f", "#f6ecce");
   scene.add(playerMesh);
@@ -76,7 +78,30 @@ export function createRenderWorld(): RenderWorld {
       projectileRoot,
       projectileMeshes: new Map(),
       lootRoot,
-      lootMeshes: new Map()
+      lootMeshes: new Map(),
+      seenEnemyIds: new Set(),
+      seenProjectileIds: new Set(),
+      seenLootIds: new Set(),
+      cameraDesiredPosition: new Vector3(),
+      cameraDesiredLookTarget: new Vector3(),
+      cameraLookTarget: new Vector3(),
+      cameraSmoothedHeading: 0,
+      cameraHeadingInitialized: false,
+      cameraLookInitialized: false,
+      playerPoseScratch: {
+        x: 0,
+        z: 0,
+        heading: 0,
+        speed: 0,
+        drift: 0
+      },
+      enemyPoseScratch: {
+        x: 0,
+        z: 0,
+        heading: 0,
+        speed: 0,
+        drift: 0
+      }
     }
   };
 }

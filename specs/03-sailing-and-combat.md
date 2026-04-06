@@ -22,6 +22,23 @@ Arcade-first handling requirements:
 - Waves primarily visual, not heavy physics simulation.
 - Optional light wind modifier.
 
+### Motion Smoothness Requirements
+
+- Sailing and turning must not exhibit visible freeze-jump stepping ("earthquake"
+  jitter) on common 60 Hz to 165 Hz displays.
+- Visual ship, projectile, and loot motion should remain continuous between
+  simulation ticks through render interpolation.
+- Wave and buoyancy visual motion should advance on render-time, not only
+  fixed simulation ticks.
+
+### Camera Stability Requirements
+
+- Camera follow should prioritize combat readability over cinematic whip.
+- Rapid heading micro-oscillation from steering should be damped so the camera
+  does not jitter frame-to-frame.
+- Speed-based camera offsets may exist, but should be restrained to avoid
+  disorienting swings at high speed.
+
 ### World Boundary Behavior
 
 - The playable sea is bounded by a circular world radius.

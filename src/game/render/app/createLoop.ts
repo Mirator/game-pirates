@@ -1,8 +1,9 @@
 export interface LoopConfig {
   fixedStep: number;
   maxFrameDelta: number;
+  beforeFixedUpdate?: () => void;
   update: (dt: number) => void;
-  render: (frameDt: number) => void;
+  render: (frameDt: number, alpha: number) => void;
 }
 
 export interface LoopController {
@@ -15,6 +16,12 @@ export function createLoop(config: LoopConfig): LoopController {
   let frameHandle = 0;
   let lastTimestamp = 0;
   let accumulator = 0;
+
+  const clamp01 = (value: number): number => {
+    if (value <= 0) return 0;
+    if (value >= 1) return 1;
+    return value;
+  };
 
   const frame = (timestamp: number): void => {
     if (!running) {
@@ -31,11 +38,13 @@ export function createLoop(config: LoopConfig): LoopController {
 
     accumulator += frameDelta;
     while (accumulator >= config.fixedStep) {
+      config.beforeFixedUpdate?.();
       config.update(config.fixedStep);
       accumulator -= config.fixedStep;
     }
 
-    config.render(frameDelta);
+    const alpha = clamp01(accumulator / config.fixedStep);
+    config.render(frameDelta, alpha);
     frameHandle = window.requestAnimationFrame(frame);
   };
 
