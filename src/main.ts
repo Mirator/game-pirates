@@ -10,6 +10,7 @@ import {
   createInitialWorldState,
   drainSimulationEvents,
   tryPurchaseHullUpgrade,
+  trySellCargo,
   updateSimulation
 } from "./game/simulation";
 import { createHud } from "./game/ui";
@@ -20,6 +21,12 @@ if (!app) {
 }
 
 const worldState = createInitialWorldState();
+const debugWindow = window as Window & {
+  __BLACKWAKE_DEBUG__?: {
+    worldState: typeof worldState;
+  };
+};
+debugWindow.__BLACKWAKE_DEBUG__ = { worldState };
 const inputController = createInputState(window);
 
 const rendererContext = createRenderer(app);
@@ -31,6 +38,11 @@ const audioSystem = createAudioSystem(window);
 const hud = createHud(app, {
   onUpgradeRequest: () => {
     if (tryPurchaseHullUpgrade(worldState)) {
+      audioSystem.handleEvents(drainSimulationEvents(worldState));
+    }
+  },
+  onSellCargoRequest: () => {
+    if (trySellCargo(worldState)) {
       audioSystem.handleEvents(drainSimulationEvents(worldState));
     }
   },
@@ -80,8 +92,12 @@ const loop = createLoop({
       lootCount: worldState.loot.length,
       gold: worldState.wallet.gold,
       repairMaterials: worldState.wallet.repairMaterials,
+      cargo: worldState.wallet.cargo,
+      treasureMaps: worldState.wallet.treasureMaps,
       playerReloadLeft: worldState.player.reload.left,
       playerReloadRight: worldState.player.reload.right,
+      burstActive: worldState.burst.active,
+      burstCooldown: worldState.burst.cooldown,
       menuOpen: worldState.port.menuOpen,
       activeEvent: worldState.eventDirector.activeKind ?? "none",
       combatIntensity: worldState.combatIntensity,
@@ -103,6 +119,7 @@ const cleanup = (): void => {
   debugOverlay.dispose();
   hud.dispose();
   audioSystem.dispose();
+  renderWorld.dispose();
   rendererContext.dispose();
 };
 

@@ -32,7 +32,7 @@ Loot types:
 - Gold: primary currency.
 - Cargo: sold at port.
 - Repair materials: consumed for repairs.
-- Treasure maps: optional objective item.
+- Treasure maps: optional objective item that queues treasure objectives.
 
 Loot sources:
 - Sunk enemy ships.
@@ -42,6 +42,7 @@ Loot sources:
 
 Economy rule:
 - Economy supports progression and clarity, not deep simulation.
+- Treasure map objectives consume one map when completed.
 
 ## Enemy Types
 

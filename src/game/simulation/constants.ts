@@ -38,6 +38,9 @@ export const PLAYER_DRAG = 1.25;
 export const PLAYER_TURN_RATE = 1.38;
 export const PLAYER_DRIFT_GAIN = 2.5;
 export const PLAYER_DRIFT_DAMPING = 2.4;
+export const PLAYER_BURST_SPEED_MULTIPLIER = 1.35;
+export const PLAYER_BURST_DURATION = 1.2;
+export const PLAYER_BURST_COOLDOWN = 4;
 
 export const ENEMY_ACCELERATION = 14;
 export const ENEMY_MAX_FORWARD_SPEED = 15;
@@ -62,6 +65,7 @@ export const ENEMY_HARD_CAP = 4;
 
 export const LOOT_LIFETIME = 20;
 export const LOOT_PICKUP_RADIUS = 3.2;
+export const CARGO_SALE_VALUE = 28;
 
 export const UPGRADE_HULL_HP_BONUS = 20;
 export const UPGRADE_HULL_COST_START = 60;

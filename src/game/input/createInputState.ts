@@ -9,6 +9,7 @@ interface KeyState {
   fireRight: boolean;
   interactQueued: boolean;
   repairQueued: boolean;
+  burst: boolean;
 }
 
 export interface InputController {
@@ -53,6 +54,9 @@ function setByLetter(keyState: KeyState, key: string, pressed: boolean, repeat: 
         keyState.repairQueued = true;
       }
       return true;
+    case "shift":
+      keyState.burst = pressed;
+      return true;
     case " ":
     case "spacebar":
       if (pressed && !repeat) {
@@ -89,6 +93,10 @@ function setByCode(keyState: KeyState, code: string, pressed: boolean, repeat: b
         keyState.repairQueued = true;
       }
       return true;
+    case "ShiftLeft":
+    case "ShiftRight":
+      keyState.burst = pressed;
+      return true;
     case "Space":
       if (pressed && !repeat) {
         keyState.interactQueued = true;
@@ -108,7 +116,8 @@ export function createInputState(target: Window = window): InputController {
     fireLeft: false,
     fireRight: false,
     interactQueued: false,
-    repairQueued: false
+    repairQueued: false,
+    burst: false
   };
 
   const state: InputState = {
@@ -117,7 +126,8 @@ export function createInputState(target: Window = window): InputController {
     fireLeft: false,
     fireRight: false,
     interact: false,
-    repair: false
+    repair: false,
+    burst: false
   };
 
   const syncState = (): void => {
@@ -127,6 +137,7 @@ export function createInputState(target: Window = window): InputController {
     state.fireRight = keyState.fireRight;
     state.interact = keyState.interactQueued;
     state.repair = keyState.repairQueued;
+    state.burst = keyState.burst;
   };
 
   const setKey = (code: string, key: string, pressed: boolean, repeat: boolean): boolean => {
@@ -162,6 +173,7 @@ export function createInputState(target: Window = window): InputController {
     keyState.fireRight = false;
     keyState.interactQueued = false;
     keyState.repairQueued = false;
+    keyState.burst = false;
     syncState();
   };
 

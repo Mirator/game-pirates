@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+﻿import { describe, expect, it } from "vitest";
 import { createInputState } from "./createInputState";
 
 interface MockKeyboardEvent {
@@ -56,10 +56,21 @@ describe("createInputState", () => {
     const target = new MockWindowTarget();
     const controller = createInputState(target as unknown as Window);
 
-    target.dispatch("keydown", { code: "KeyA", key: "ф", repeat: false });
+    target.dispatch("keydown", { code: "KeyA", key: "f", repeat: false });
     expect(controller.state.turn).toBe(1);
 
-    target.dispatch("keyup", { code: "KeyA", key: "ф", repeat: false });
+    target.dispatch("keyup", { code: "KeyA", key: "f", repeat: false });
     expect(controller.state.turn).toBe(0);
+  });
+
+  it("tracks burst on Shift hold", () => {
+    const target = new MockWindowTarget();
+    const controller = createInputState(target as unknown as Window);
+
+    target.dispatch("keydown", { code: "ShiftLeft", key: "Shift", repeat: false });
+    expect(controller.state.burst).toBe(true);
+
+    target.dispatch("keyup", { code: "ShiftLeft", key: "Shift", repeat: false });
+    expect(controller.state.burst).toBe(false);
   });
 });

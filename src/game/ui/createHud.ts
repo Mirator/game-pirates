@@ -1,7 +1,8 @@
-import { TREASURE_INTERACT_RADIUS, type WorldEventKind, type WorldState } from "../simulation";
+import { CARGO_SALE_VALUE, TREASURE_INTERACT_RADIUS, type WorldEventKind, type WorldState } from "../simulation";
 
 interface HudOptions {
   onUpgradeRequest: () => void;
+  onSellCargoRequest: () => void;
   onCloseDockMenu: () => void;
   target?: Window;
 }
@@ -266,6 +267,14 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
   });
   dockMenu.appendChild(upgradeButton);
 
+  const sellCargoButton = document.createElement("button");
+  sellCargoButton.type = "button";
+  sellCargoButton.className = "dock-menu-upgrade";
+  sellCargoButton.addEventListener("click", () => {
+    options.onSellCargoRequest();
+  });
+  dockMenu.appendChild(sellCargoButton);
+
   const closeButton = document.createElement("button");
   closeButton.type = "button";
   closeButton.className = "dock-menu-close";
@@ -289,8 +298,8 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
       hpLabel.textContent = `Hull ${Math.round(worldState.player.hp)} / ${Math.round(worldState.player.maxHp)}`;
       hpBarFill.style.width = `${clamp(hpPercent, 0, 100).toFixed(1)}%`;
 
-      reloadLabel.textContent = `Cannons L ${worldState.player.reload.left.toFixed(1)}s  R ${worldState.player.reload.right.toFixed(1)}s`;
-      walletLabel.textContent = `Gold ${worldState.wallet.gold}  Materials ${worldState.wallet.repairMaterials}`;
+      reloadLabel.textContent = `Cannons Port ${worldState.player.reload.left.toFixed(1)}s  Starboard ${worldState.player.reload.right.toFixed(1)}s`;
+      walletLabel.textContent = `Gold ${worldState.wallet.gold}  Materials ${worldState.wallet.repairMaterials}  Cargo ${worldState.wallet.cargo}  Maps ${worldState.wallet.treasureMaps}`;
 
       const eventTitle = formatEventLabel(worldState.eventDirector.activeKind);
       if (worldState.eventDirector.activeKind) {
@@ -300,7 +309,8 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
       }
 
       if (worldState.treasureObjective.active) {
-        objectiveLabel.textContent = `Objective: Reach ${getIslandLabel(worldState, worldState.treasureObjective.targetIslandId)} and press Space (+${worldState.treasureObjective.rewardGold}g).`;
+        const sourceLabel = worldState.treasureObjective.fromMap ? "map objective" : "world marker";
+        objectiveLabel.textContent = `Objective (${sourceLabel}): Reach ${getIslandLabel(worldState, worldState.treasureObjective.targetIslandId)} and press Space (+${worldState.treasureObjective.rewardGold}g).`;
       } else if (worldState.wallet.gold >= worldState.upgrade.nextCost) {
         objectiveLabel.textContent = "Objective: Dock at port and buy Hull Reinforcement.";
       } else {
@@ -317,6 +327,8 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
         prompt.textContent = "Press Space to secure treasure cache.";
       } else if (worldState.port.playerNearPort) {
         prompt.textContent = "Press Space to dock at port.";
+      } else if (worldState.burst.cooldown <= 0) {
+        prompt.textContent = "Hold Shift for a speed burst.";
       } else if (
         worldState.player.repairCooldown <= 0 &&
         worldState.wallet.repairMaterials > 0 &&
@@ -328,9 +340,11 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
       }
 
       upgradeMeta.textContent =
-        `Hull Level ${worldState.upgrade.hullLevel}  |  Next Cost ${worldState.upgrade.nextCost} gold  |  +20 Max HP`;
+        `Hull Level ${worldState.upgrade.hullLevel}  |  Next Cost ${worldState.upgrade.nextCost} gold  |  Cargo Value ${worldState.wallet.cargo * CARGO_SALE_VALUE} gold`;
       upgradeButton.textContent = `Buy Hull Reinforcement (${worldState.upgrade.nextCost}g)`;
       upgradeButton.disabled = worldState.wallet.gold < worldState.upgrade.nextCost || !worldState.port.menuOpen;
+      sellCargoButton.textContent = `Sell Cargo (${worldState.wallet.cargo} units)`;
+      sellCargoButton.disabled = worldState.wallet.cargo <= 0 || !worldState.port.menuOpen;
 
       dockMenu.style.display = worldState.port.menuOpen ? "flex" : "none";
       drawMinimap(worldState, minimapCanvas);

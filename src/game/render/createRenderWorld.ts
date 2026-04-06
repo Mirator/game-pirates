@@ -10,11 +10,13 @@ export interface RenderWorld {
   scene: Scene;
   camera: PerspectiveCamera;
   bridge: RenderBridgeState;
+  dispose: () => void;
 }
 
 export function createRenderWorld(): RenderWorld {
   const scene = createScene();
-  const camera = createCamera();
+  const cameraController = createCamera();
+  const { camera } = cameraController;
 
   const environment = createEnvironment(scene);
 
@@ -61,6 +63,9 @@ export function createRenderWorld(): RenderWorld {
   return {
     scene,
     camera,
+    dispose: () => {
+      cameraController.dispose();
+    },
     bridge: {
       scene,
       camera,

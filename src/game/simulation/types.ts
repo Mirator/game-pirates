@@ -1,9 +1,9 @@
 export type ShipOwner = "player" | "enemy";
 export type CannonSide = "left" | "right";
 export type ShipStatus = "alive" | "sinking";
-export type EnemyAiState = "patrol" | "chase" | "broadside";
+export type EnemyAiState = "patrol" | "detect" | "chase" | "line_up_broadside" | "fire" | "flee";
 export type EnemyArchetype = "merchant" | "raider" | "navy";
-export type LootKind = "gold" | "repair_material";
+export type LootKind = "gold" | "repair_material" | "cargo" | "treasure_map";
 export type IslandKind = "port" | "treasure" | "hostile" | "scenic";
 export type WorldEventKind = "treasure_marker" | "enemy_convoy" | "storm" | "navy_patrol";
 
@@ -39,6 +39,9 @@ export interface EnemyState extends ShipState {
   aiState: EnemyAiState;
   patrolAngle: number;
   lootDropped: boolean;
+  aiStateTimer: number;
+  detectProgress: number;
+  pendingFireSide: CannonSide | null;
 }
 
 export interface IslandState {
@@ -72,6 +75,8 @@ export interface LootState {
 export interface WalletState {
   gold: number;
   repairMaterials: number;
+  cargo: number;
+  treasureMaps: number;
 }
 
 export interface UpgradeState {
@@ -102,6 +107,8 @@ export interface TreasureObjectiveState {
   targetIslandId: number | null;
   rewardGold: number;
   completedCount: number;
+  fromMap: boolean;
+  queuedMaps: number;
 }
 
 export interface StormState {
@@ -110,6 +117,12 @@ export interface StormState {
   radius: number;
   remaining: number;
   intensity: number;
+}
+
+export interface BurstState {
+  active: boolean;
+  remaining: number;
+  cooldown: number;
 }
 
 export interface EventDirectorState {
@@ -133,9 +146,13 @@ export type SimulationEvent =
   | { type: "ship_hit"; target: ShipOwner }
   | { type: "ship_sunk"; owner: ShipOwner }
   | { type: "loot_pickup"; kind: LootKind; amount: number }
+  | { type: "cargo_sold"; amount: number; goldGained: number }
+  | { type: "treasure_map_used" }
   | { type: "dock_open" }
   | { type: "dock_close" }
   | { type: "repair_used" }
+  | { type: "burst_started" }
+  | { type: "burst_ready" }
   | { type: "upgrade_purchased"; level: number }
   | { type: "treasure_collected"; amount: number }
   | { type: "world_event_started"; kind: WorldEventKind };
@@ -156,12 +173,14 @@ export interface WorldState {
   wallet: WalletState;
   upgrade: UpgradeState;
   port: PortState;
+  burst: BurstState;
   spawnDirector: SpawnDirectorState;
   treasureObjective: TreasureObjectiveState;
   storm: StormState;
   eventDirector: EventDirectorState;
   combatIntensity: number;
   events: SimulationEvent[];
+  __ecs?: unknown;
 }
 
 export interface InputState {
@@ -171,4 +190,5 @@ export interface InputState {
   fireRight: boolean;
   interact: boolean;
   repair: boolean;
+  burst: boolean;
 }

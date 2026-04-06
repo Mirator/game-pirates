@@ -267,7 +267,6 @@ export function createEnvironment(scene: Scene): EnvironmentObjects {
         waterPositions[i + 1] = waveA + waveB;
       }
       positionAttribute.needsUpdate = true;
-      waterGeometry.computeVertexNormals();
 
       shallowRing.rotation.z = worldState.time * 0.025;
 
@@ -331,6 +330,7 @@ export function createEnvironment(scene: Scene): EnvironmentObjects {
 
       workingColor.copy(calmWaterColor).lerp(stormWaterColor, stormBlend);
       waterMaterial.color.copy(workingColor);
+      waterMaterial.emissiveIntensity = 0.02 + Math.sin(worldState.time * 1.8) * 0.01 + stormBlend * 0.02;
       shallowRingMaterial.opacity = 0.45 - stormBlend * 0.12;
 
       if (fog) {

@@ -68,7 +68,9 @@ export function createInitialWorldState(): WorldState {
     loot: [],
     wallet: {
       gold: 0,
-      repairMaterials: 0
+      repairMaterials: 0,
+      cargo: 0,
+      treasureMaps: 0
     },
     upgrade: {
       hullLevel: 0,
@@ -83,6 +85,11 @@ export function createInitialWorldState(): WorldState {
       playerInRange: false,
       playerNearPort: false
     },
+    burst: {
+      active: false,
+      remaining: 0,
+      cooldown: 0
+    },
     spawnDirector: {
       maxActive: ENEMY_SPAWN_MAX_ACTIVE,
       initialSpawnDelay: ENEMY_INITIAL_SPAWN_DELAY,
@@ -94,7 +101,9 @@ export function createInitialWorldState(): WorldState {
       markerPosition: { x: -58, z: 22 },
       targetIslandId: null,
       rewardGold: TREASURE_REWARD_BASE,
-      completedCount: 0
+      completedCount: 0,
+      fromMap: false,
+      queuedMaps: 0
     },
     storm: {
       active: false,

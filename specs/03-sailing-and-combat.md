@@ -7,11 +7,11 @@ Define core ship handling and combat rules for the first playable game.
 ## Controls
 
 - W or S: accelerate or decelerate.
-- A or D: turn left or right.
-- Q or E: fire left or right broadside.
+- A or D: turn port or starboard.
+- Q or E: fire port or starboard broadside.
 - R: repair ship.
 - Space: interact, dock, or collect nearby loot.
-- Shift: temporary speed burst.
+- Shift: temporary speed burst (1.35x speed cap, 1.2s active, 4.0s cooldown).
 
 ## Sailing Model
 
@@ -27,7 +27,7 @@ MVP fun.
 
 ## Combat Rules
 
-- Cannons are split by left and right side.
+- Cannons are split by port and starboard side.
 - Each side has an independent reload timer.
 - Cannonballs are visible projectiles.
 - Enemy hits damage hull HP.

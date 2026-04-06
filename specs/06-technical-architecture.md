@@ -34,7 +34,22 @@ Even in singleplayer, organize systems as if networking will be added later.
 - Keep simulation state separate from rendering state.
 - Do not place gameplay logic inside camera code.
 - Avoid DOM-driven authoritative game state.
-- Prefer component and system style organization.
+- Prefer component and system style organization with ECS-style entity tables.
+
+## ECS System Order
+
+Simulation tick order:
+1. Input capture.
+2. Event timers.
+3. Enemy AI intent.
+4. Movement.
+5. Storm effects.
+6. Combat fire.
+7. Projectile motion and hits.
+8. Sinking and respawn.
+9. Loot lifecycle and pickup.
+10. Port/menu/upgrade interactions.
+11. Cleanup and projection to render/UI world view.
 
 ## Reference Folder Layout
 

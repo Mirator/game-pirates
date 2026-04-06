@@ -289,9 +289,22 @@ export function createAudioSystem(target: Window = window): AudioSystem {
           case "repair_used":
             playTone(300, 0.17, { type: "sine", gain: 0.07, frequencyEnd: 500 });
             break;
+          case "burst_started":
+            playTone(420, 0.1, { type: "triangle", gain: 0.08, frequencyEnd: 620 });
+            break;
+          case "burst_ready":
+            playTone(280, 0.12, { type: "sine", gain: 0.05, frequencyEnd: 340 });
+            break;
           case "upgrade_purchased":
             playTone(520, 0.15, { type: "triangle", gain: 0.08, frequencyEnd: 680 });
             playTone(730, 0.18, { type: "triangle", gain: 0.08, frequencyEnd: 900, delay: 0.07 });
+            break;
+          case "cargo_sold":
+            playTone(500, 0.09, { type: "triangle", gain: 0.08, frequencyEnd: 760 });
+            playTone(710, 0.13, { type: "triangle", gain: 0.07, frequencyEnd: 930, delay: 0.04 });
+            break;
+          case "treasure_map_used":
+            playTone(360, 0.12, { type: "sine", gain: 0.06, frequencyEnd: 420 });
             break;
           case "treasure_collected":
             playTone(640, 0.14, { type: "triangle", gain: 0.09, frequencyEnd: 880 });
