@@ -155,6 +155,10 @@ export function worldHeadingToMinimapRotation(heading: number): number {
   return -heading;
 }
 
+export function projectWorldToMinimapPlane(x: number, z: number): { x: number; y: number } {
+  return { x: -x, y: -z };
+}
+
 function resolvePrompt(worldState: WorldState): PromptInfo {
   if (worldState.port.menuOpen) {
     return {
@@ -265,8 +269,9 @@ function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): void {
   ctx.stroke();
 
   const drawDot = (x: number, z: number, color: string, size: number): void => {
-    const px = centerX + x * worldToPixel;
-    const py = centerY - z * worldToPixel;
+    const mapped = projectWorldToMinimapPlane(x, z);
+    const px = centerX + mapped.x * worldToPixel;
+    const py = centerY + mapped.y * worldToPixel;
     const dx = px - centerX;
     const dy = py - centerY;
     const distance = Math.hypot(dx, dy);
@@ -287,8 +292,9 @@ function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): void {
   ctx.clip();
 
   if (worldState.storm.active) {
-    const stormX = centerX + worldState.storm.center.x * worldToPixel;
-    const stormY = centerY - worldState.storm.center.z * worldToPixel;
+    const mappedStorm = projectWorldToMinimapPlane(worldState.storm.center.x, worldState.storm.center.z);
+    const stormX = centerX + mappedStorm.x * worldToPixel;
+    const stormY = centerY + mappedStorm.y * worldToPixel;
     const stormRadius = worldState.storm.radius * worldToPixel;
 
     ctx.strokeStyle = "rgba(153, 190, 217, 0.7)";
@@ -330,8 +336,9 @@ function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): void {
   ctx.restore();
 
   const player = worldState.player;
-  const playerX = centerX + player.position.x * worldToPixel;
-  const playerY = centerY - player.position.z * worldToPixel;
+  const mappedPlayer = projectWorldToMinimapPlane(player.position.x, player.position.z);
+  const playerX = centerX + mappedPlayer.x * worldToPixel;
+  const playerY = centerY + mappedPlayer.y * worldToPixel;
 
   ctx.save();
   ctx.translate(playerX, playerY);

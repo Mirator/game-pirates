@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { worldHeadingToMinimapRotation } from "./createHud";
+import { projectWorldToMinimapPlane, worldHeadingToMinimapRotation } from "./createHud";
 
 function rotateTip(heading: number): { x: number; y: number } {
   const rotation = worldHeadingToMinimapRotation(heading);
@@ -24,5 +24,23 @@ describe("worldHeadingToMinimapRotation", () => {
     const tip = rotateTip(-Math.PI * 0.5);
     expect(tip.x).toBeGreaterThan(0);
     expect(Math.abs(tip.y)).toBeLessThan(1e-6);
+  });
+
+  it("keeps arrow direction aligned with mapped forward movement across headings", () => {
+    const headings = [0, Math.PI * 0.5, -Math.PI * 0.5, Math.PI * 0.25, -Math.PI * 0.75];
+
+    for (const heading of headings) {
+      const worldForwardX = Math.sin(heading);
+      const worldForwardZ = Math.cos(heading);
+      const mappedForward = projectWorldToMinimapPlane(worldForwardX, worldForwardZ);
+      const tip = rotateTip(heading);
+
+      const forwardLength = Math.hypot(mappedForward.x, mappedForward.y);
+      const tipLength = Math.hypot(tip.x, tip.y);
+      const dot = mappedForward.x * tip.x + mappedForward.y * tip.y;
+      const cosine = dot / Math.max(1e-8, forwardLength * tipLength);
+
+      expect(cosine).toBeGreaterThan(0.999);
+    }
   });
 });
