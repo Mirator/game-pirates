@@ -691,6 +691,7 @@ export function syncRenderFromSimulation(
   );
 
   if (!bridge.cameraLookInitialized) {
+    bridge.camera.position.copy(bridge.cameraDesiredPosition);
     bridge.cameraLookTarget.copy(bridge.cameraDesiredLookTarget);
     bridge.cameraLookInitialized = true;
   }

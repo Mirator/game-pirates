@@ -1,27 +1,30 @@
 export const FIXED_TIME_STEP = 1 / 60;
 export const MAX_FRAME_DT = 1 / 20;
 
-export const WORLD_BOUNDS_RADIUS = 95;
+export const WORLD_LAYOUT_SCALE = 2;
+const scaleWorldCoord = (value: number): number => value * WORLD_LAYOUT_SCALE;
 
-export const PLAYER_RESPAWN = { x: 0, z: -10, heading: 0 };
-export const PORT_POSITION = { x: 0, z: 48 };
+export const WORLD_BOUNDS_RADIUS = scaleWorldCoord(95);
+
+export const PLAYER_RESPAWN = { x: scaleWorldCoord(0), z: scaleWorldCoord(-10), heading: 0 };
+export const PORT_POSITION = { x: scaleWorldCoord(0), z: scaleWorldCoord(48) };
 export const PORT_RADIUS = 15;
 export const PORT_PROMPT_RADIUS = 22;
 export const PORT_SAFE_RADIUS = 24;
 export const ISLAND_LAYOUT = [
-  { id: 0, kind: "port", label: "Port Haven", x: 0, z: 48, radius: 13 },
-  { id: 1, kind: "treasure", label: "Skull Key", x: -58, z: 22, radius: 11 },
-  { id: 2, kind: "hostile", label: "Redwatch", x: 56, z: -40, radius: 12 },
-  { id: 3, kind: "scenic", label: "Palmrest", x: -22, z: -56, radius: 10 },
-  { id: 4, kind: "treasure", label: "Sunken Crown", x: 62, z: 38, radius: 10 }
+  { id: 0, kind: "port", label: "Port Haven", x: scaleWorldCoord(0), z: scaleWorldCoord(48), radius: 13 },
+  { id: 1, kind: "treasure", label: "Skull Key", x: scaleWorldCoord(-58), z: scaleWorldCoord(22), radius: 11 },
+  { id: 2, kind: "hostile", label: "Redwatch", x: scaleWorldCoord(56), z: scaleWorldCoord(-40), radius: 12 },
+  { id: 3, kind: "scenic", label: "Palmrest", x: scaleWorldCoord(-22), z: scaleWorldCoord(-56), radius: 10 },
+  { id: 4, kind: "treasure", label: "Sunken Crown", x: scaleWorldCoord(62), z: scaleWorldCoord(38), radius: 10 }
 ] as const;
 export const ENEMY_SPAWN_POINTS = [
-  { x: 45, z: -34, heading: Math.PI * 0.62 },
-  { x: -54, z: -32, heading: Math.PI * 1.78 },
-  { x: 58, z: 6, heading: Math.PI * 0.95 },
-  { x: -60, z: 14, heading: Math.PI * 1.25 },
-  { x: 34, z: 66, heading: Math.PI * 1.6 },
-  { x: -34, z: 68, heading: Math.PI * 1.35 }
+  { x: scaleWorldCoord(45), z: scaleWorldCoord(-34), heading: Math.PI * 0.62 },
+  { x: scaleWorldCoord(-54), z: scaleWorldCoord(-32), heading: Math.PI * 1.78 },
+  { x: scaleWorldCoord(58), z: scaleWorldCoord(6), heading: Math.PI * 0.95 },
+  { x: scaleWorldCoord(-60), z: scaleWorldCoord(14), heading: Math.PI * 1.25 },
+  { x: scaleWorldCoord(34), z: scaleWorldCoord(66), heading: Math.PI * 1.6 },
+  { x: scaleWorldCoord(-34), z: scaleWorldCoord(68), heading: Math.PI * 1.35 }
 ];
 
 export const SHIP_MAX_HP = 100;

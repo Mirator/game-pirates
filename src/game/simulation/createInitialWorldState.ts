@@ -48,6 +48,19 @@ function createIslands(): IslandState[] {
 }
 
 export function createInitialWorldState(): WorldState {
+  const islands = createIslands();
+  const treasureMarkerIsland = islands.find((island) => island.kind === "treasure") ?? islands[0];
+  const stormCenterIsland =
+    islands.find((island) => island.kind === "hostile" || island.kind === "scenic") ?? islands[0];
+
+  const treasureMarkerPosition = treasureMarkerIsland
+    ? { x: treasureMarkerIsland.position.x, z: treasureMarkerIsland.position.z }
+    : { x: PLAYER_RESPAWN.x, z: PLAYER_RESPAWN.z };
+
+  const stormCenterPosition = stormCenterIsland
+    ? { x: stormCenterIsland.position.x, z: stormCenterIsland.position.z }
+    : { x: PORT_POSITION.x, z: PORT_POSITION.z };
+
   return {
     time: 0,
     phase: "running",
@@ -62,7 +75,7 @@ export function createInitialWorldState(): WorldState {
     nextEnemyId: 1,
     nextLootId: 1,
     player: createShip("player", PLAYER_RESPAWN),
-    islands: createIslands(),
+    islands,
     enemies: [],
     projectiles: [],
     loot: [],
@@ -98,7 +111,7 @@ export function createInitialWorldState(): WorldState {
     },
     treasureObjective: {
       active: false,
-      markerPosition: { x: -58, z: 22 },
+      markerPosition: treasureMarkerPosition,
       targetIslandId: null,
       rewardGold: TREASURE_REWARD_BASE,
       completedCount: 0,
@@ -107,7 +120,7 @@ export function createInitialWorldState(): WorldState {
     },
     storm: {
       active: false,
-      center: { x: 34, z: -18 },
+      center: stormCenterPosition,
       radius: STORM_RADIUS,
       remaining: 0,
       intensity: STORM_INTENSITY_MAX

@@ -44,7 +44,8 @@ import {
   TREASURE_REWARD_BASE,
   TREASURE_REWARD_STEP,
   UPGRADE_HULL_COST_STEP,
-  UPGRADE_HULL_HP_BONUS
+  UPGRADE_HULL_HP_BONUS,
+  WORLD_LAYOUT_SCALE
 } from "../constants";
 import type {
   CannonSide,
@@ -662,7 +663,7 @@ function enemyAiIntentSystem(worldState: WorldWithEcs, enemy: EnemyState, dt: nu
     turn = steeringTowardHeading(enemy.heading, awayHeading);
   } else if (enemy.aiState === "patrol") {
     enemy.patrolAngle += dt * (enemy.archetype === "merchant" ? 0.55 : 0.35);
-    const patrolRadius = 33 + (enemy.id % 4) * 5;
+    const patrolRadius = (33 + (enemy.id % 4) * 5) * WORLD_LAYOUT_SCALE;
     const targetX = Math.cos(enemy.patrolAngle) * patrolRadius;
     const targetZ = Math.sin(enemy.patrolAngle) * patrolRadius;
     const targetHeading = Math.atan2(targetX - enemy.position.x, targetZ - enemy.position.z);

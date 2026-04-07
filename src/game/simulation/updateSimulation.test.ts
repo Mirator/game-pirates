@@ -158,8 +158,10 @@ describe("updateSimulation ECS pipeline", () => {
     const worldState = createInitialWorldState();
     quietWorld(worldState);
 
-    worldState.player.position.x = 62;
-    worldState.player.position.z = 72.5;
+    const outsideBoundsDistance = worldState.boundsRadius + 2;
+    const outsideBoundsAngle = 0.72;
+    worldState.player.position.x = Math.sin(outsideBoundsAngle) * outsideBoundsDistance;
+    worldState.player.position.z = Math.cos(outsideBoundsAngle) * outsideBoundsDistance;
     worldState.player.heading = 0.2;
     worldState.player.speed = 14;
     worldState.player.drift = 2;
