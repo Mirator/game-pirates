@@ -35,6 +35,7 @@ const debugWindow = window as Window & {
     worldState: typeof worldState;
     water?: ReturnType<typeof createRenderWorld>["bridge"]["environment"]["water"];
     lighting?: ReturnType<typeof createRenderWorld>["bridge"]["environment"]["lighting"];
+    wake?: ReturnType<typeof createRenderWorld>["bridge"]["wakeDebug"];
   };
 };
 const inputController = createInputState(window);
@@ -46,7 +47,8 @@ renderer.toneMappingExposure = renderWorld.bridge.environment.lighting.getCurren
 debugWindow.__BLACKWAKE_DEBUG__ = {
   worldState,
   water: renderWorld.bridge.environment.water,
-  lighting: renderWorld.bridge.environment.lighting
+  lighting: renderWorld.bridge.environment.lighting,
+  wake: renderWorld.bridge.wakeDebug
 };
 
 const debugOverlay = createDebugOverlay(app, window);
@@ -84,7 +86,8 @@ const previousSnapshot: RenderPreviousSnapshot = {
     z: worldState.player.position.z,
     heading: worldState.player.heading,
     speed: worldState.player.speed,
-    drift: worldState.player.drift
+    drift: worldState.player.drift,
+    throttle: worldState.player.throttle
   },
   enemies: new Map(),
   projectiles: new Map(),
@@ -109,6 +112,7 @@ const copyShipSnapshot = (target: RenderShipSnapshot, source: typeof worldState.
   target.heading = source.heading;
   target.speed = source.speed;
   target.drift = source.drift;
+  target.throttle = source.throttle;
 };
 
 const copyPositionSnapshot = (target: RenderPositionSnapshot, x: number, z: number): void => {
@@ -128,7 +132,8 @@ const capturePreviousSnapshot = (): void => {
         z: enemy.position.z,
         heading: enemy.heading,
         speed: enemy.speed,
-        drift: enemy.drift
+        drift: enemy.drift,
+        throttle: enemy.throttle
       };
       previousSnapshot.enemies.set(enemy.id, target);
     } else {

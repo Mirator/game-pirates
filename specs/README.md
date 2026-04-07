@@ -14,6 +14,8 @@ to one or more spec files.
 - [06 Technical Architecture](06-technical-architecture.md)
 - [07 Roadmap and Scope Guardrails](07-roadmap-and-scope-guardrails.md)
 - [08 Stylized Ocean, Lighting, and Atmospheric Rendering Upgrade](08-stylized-ocean-rendering.md)
+- [09 Ship Visual and Gameplay Representation Upgrade](09-ship-visual-and-gameplay-representation-upgrade.md)
+- [10 Stylized Ship Wake Rendering System](10-ship-wake-rendering-system.md)
 
 ## How To Use
 

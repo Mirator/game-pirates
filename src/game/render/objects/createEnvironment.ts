@@ -23,7 +23,7 @@ import {
   Vector3,
   Vector4
 } from "three";
-import { PLAYER_MAX_FORWARD_SPEED, type IslandKind, type IslandState, type WorldState } from "../../simulation";
+import { type IslandKind, type IslandState, type WorldState } from "../../simulation";
 import {
   createAtmosphereTuningFromPreset,
   createDefaultAtmosphereConfig,
@@ -35,7 +35,7 @@ import {
   type AtmosphereTuningControls
 } from "../atmosphere/atmosphereConfig";
 import { createWaterNormalTexture } from "../water/createWaterNormalTexture";
-import { buildWaveShaderUniformState, computeWakeIntensity } from "../water/waterMath";
+import { buildWaveShaderUniformState } from "../water/waterMath";
 import {
   createDefaultWaterConfig,
   getWaterQualityPreset,
@@ -56,6 +56,20 @@ export interface EnvironmentPlayerPose {
   drift: number;
 }
 
+export interface EnvironmentWakeInfluence {
+  sternX: number;
+  sternZ: number;
+  forwardX: number;
+  forwardZ: number;
+  intensity: number;
+  width: number;
+  length: number;
+  turn: number;
+  normalBoost: number;
+  foamTint: number;
+  falloff: number;
+}
+
 export interface EnvironmentSyncContext {
   frameDt: number;
   renderTime: number;
@@ -65,6 +79,7 @@ export interface EnvironmentSyncContext {
     z: number;
   };
   playerPose: EnvironmentPlayerPose;
+  wakeInfluences?: readonly EnvironmentWakeInfluence[];
 }
 
 export interface EnvironmentObjects {
@@ -228,6 +243,8 @@ function createWaterGeometry(segments: number): PlaneGeometry {
   return geometry;
 }
 
+const WATER_MAX_WAKE_SOURCES = 12;
+
 const WATER_VERTEX_SHADER = `
 #define MAX_WAVES ${WATER_MAX_WAVE_COMPONENTS}
 
@@ -295,6 +312,7 @@ void main() {
 
 const WATER_FRAGMENT_SHADER = `
 #define MAX_ISLANDS ${WATER_MAX_ISLANDS}
+#define MAX_WAKE_SOURCES ${WATER_MAX_WAKE_SOURCES}
 
 uniform float uTime;
 uniform vec3 uCameraPos;
@@ -318,13 +336,12 @@ uniform float uFresnelPower;
 uniform float uSpecularStrength;
 uniform float uSpecularExponent;
 
-uniform vec2 uPlayerPos;
-uniform vec2 uPlayerForward;
-uniform float uPlayerSpeedNorm;
-uniform float uBurstFactor;
-uniform float uWakeIntensity;
-uniform float uWakeLength;
-uniform float uWakeWidth;
+uniform int uWakeSourceCount;
+uniform vec4 uWakeSources[MAX_WAKE_SOURCES];
+uniform vec4 uWakeDirections[MAX_WAKE_SOURCES];
+uniform vec4 uWakeTuning[MAX_WAKE_SOURCES];
+uniform float uWakeDistortionStrength;
+uniform float uWakeFoamTintStrength;
 uniform float uFoamThreshold;
 
 uniform int uShorelineEnabled;
@@ -360,6 +377,64 @@ float computeShorelineMask() {
   return mask * uShorelineStrength;
 }
 
+float computeWakeFactor(out vec2 wakeFlow, out float wakeFoamTint) {
+  wakeFlow = vec2(0.0);
+  wakeFoamTint = 0.0;
+
+  float wakeFactor = 0.0;
+  for (int i = 0; i < MAX_WAKE_SOURCES; i += 1) {
+    if (i >= uWakeSourceCount) {
+      continue;
+    }
+
+    vec4 source = uWakeSources[i];
+    vec4 direction = uWakeDirections[i];
+    vec4 tuning = uWakeTuning[i];
+
+    float intensity = source.z;
+    if (intensity <= 0.0001) {
+      continue;
+    }
+
+    vec2 stern = source.xy;
+    float width = max(0.001, source.w);
+    vec2 forward = normalize(direction.xy);
+    float trailLength = max(width, direction.z);
+    float turn = direction.w;
+    float normalBoost = tuning.x;
+    float foamTint = tuning.y;
+    float falloff = max(0.2, tuning.z);
+
+    vec2 toFragment = vWorldPos.xz - stern;
+    float along = dot(toFragment, -forward);
+    if (along <= 0.0 || along > trailLength) {
+      continue;
+    }
+
+    vec2 right = vec2(-forward.y, forward.x);
+    float lateral = dot(toFragment, right);
+    float absLateral = abs(lateral);
+
+    float widthMask = 1.0 - smoothstep(width * 0.45, width * 1.35, absLateral);
+    float lengthMask = 1.0 - smoothstep(trailLength * 0.04, trailLength * 0.78, along);
+    float sternMask = 1.0 - smoothstep(width * 0.12, width * 0.72, length(toFragment));
+    float swirl = 0.92 + sin((along * 0.55 + uTime * 2.4) + lateral * 0.75) * 0.08;
+
+    float ribbonContribution = widthMask * lengthMask * falloff * 0.24;
+    float sternContribution = sternMask * 0.48;
+    float contribution = max(ribbonContribution, sternContribution) * intensity * swirl;
+    wakeFactor += contribution;
+    wakeFoamTint += contribution * foamTint * 0.55;
+
+    float signedLateral = clamp(lateral / (width * 1.2), -1.0, 1.0);
+    wakeFlow += right * signedLateral * contribution * (0.6 + abs(turn) * 0.4) * normalBoost * 0.65;
+  }
+
+  wakeFactor = clamp(wakeFactor, 0.0, 0.65);
+  wakeFoamTint = clamp(wakeFoamTint, 0.0, 0.55);
+  return wakeFactor;
+}
+
 void main() {
   vec2 uvA = vWorldUv * uNormalTilingA + uTime * uNormalScrollA;
   vec2 uvB = vWorldUv * uNormalTilingB + uTime * uNormalScrollB;
@@ -374,19 +449,13 @@ void main() {
 
   float shorelineMask = computeShorelineMask();
 
-  vec2 forward = normalize(uPlayerForward);
-  vec2 toFragment = vWorldPos.xz - uPlayerPos;
-  float behindShip = max(0.0, dot(toFragment, -forward));
-  vec2 right = vec2(-forward.y, forward.x);
-  float lateralDistance = abs(dot(toFragment, right));
+  vec2 wakeFlow;
+  float wakeFoamTint;
+  float wakeFactor = computeWakeFactor(wakeFlow, wakeFoamTint);
+  surfaceNormal = normalize(surfaceNormal + vec3(wakeFlow.x, wakeFactor * uWakeDistortionStrength, wakeFlow.y));
+  float foamFactor = smoothstep(uFoamThreshold + 0.2, 0.95, wakeFactor);
 
-  float wakeTrail = smoothstep(0.0, uWakeLength, behindShip) * (1.0 - smoothstep(uWakeWidth, uWakeWidth * 1.85, lateralDistance));
-  wakeTrail *= step(0.05, behindShip);
-  float hullDisturbance = 1.0 - smoothstep(uWakeWidth * 0.45, uWakeWidth * 1.7, length(toFragment));
-  float wakeFactor = (wakeTrail * 0.8 + hullDisturbance * 0.65) * uWakeIntensity * uPlayerSpeedNorm * (1.0 + uBurstFactor * 0.45);
-  float foamFactor = smoothstep(uFoamThreshold, 1.0, wakeFactor);
-
-  vec3 baseColor = mix(uDeepColor, uShallowColor, clamp(shorelineMask + wakeFactor * 0.2, 0.0, 1.0));
+  vec3 baseColor = mix(uDeepColor, uShallowColor, clamp(shorelineMask + wakeFactor * 0.045, 0.0, 1.0));
   baseColor = mix(baseColor, uStormColor, clamp(uStormBlend, 0.0, 1.0) * 0.72);
 
   float ndv = max(0.0, dot(surfaceNormal, viewDirection));
@@ -397,7 +466,11 @@ void main() {
   vec3 finalColor = baseColor;
   finalColor += fresnel * vec3(0.3, 0.46, 0.62);
   finalColor += specular * vec3(1.0, 0.95, 0.84);
-  finalColor = mix(finalColor, uFoamColor, clamp(foamFactor, 0.0, 1.0));
+  finalColor = mix(
+    finalColor,
+    uFoamColor,
+    clamp(foamFactor * (0.16 + wakeFoamTint * uWakeFoamTintStrength), 0.0, 0.28)
+  );
 
   gl_FragColor = vec4(finalColor, 1.0);
   #include <tonemapping_fragment>
@@ -547,6 +620,9 @@ export function createEnvironment(
 
   const waveDirections = Array.from({ length: WATER_MAX_WAVE_COMPONENTS }, () => new Vector2(1, 0));
   const islandData = Array.from({ length: WATER_MAX_ISLANDS }, () => new Vector4(0, 0, 0, 0));
+  const wakeSourceData = Array.from({ length: WATER_MAX_WAKE_SOURCES }, () => new Vector4(0, 0, 0, 0));
+  const wakeDirectionData = Array.from({ length: WATER_MAX_WAKE_SOURCES }, () => new Vector4(0, 1, 0, 0));
+  const wakeTuningData = Array.from({ length: WATER_MAX_WAKE_SOURCES }, () => new Vector4(0, 0, 1, 0));
   const normalMapA = createWaterNormalTexture(128, 11.3);
   const normalMapB = createWaterNormalTexture(128, 29.7);
 
@@ -577,13 +653,12 @@ export function createEnvironment(
     uFresnelPower: { value: 4.4 },
     uSpecularStrength: { value: 0.6 },
     uSpecularExponent: { value: 40 },
-    uPlayerPos: { value: new Vector2(0, 0) },
-    uPlayerForward: { value: new Vector2(0, 1) },
-    uPlayerSpeedNorm: { value: 0 },
-    uBurstFactor: { value: 0 },
-    uWakeIntensity: { value: 0.9 },
-    uWakeLength: { value: 22 },
-    uWakeWidth: { value: 2.2 },
+    uWakeSourceCount: { value: 0 },
+    uWakeSources: { value: wakeSourceData },
+    uWakeDirections: { value: wakeDirectionData },
+    uWakeTuning: { value: wakeTuningData },
+    uWakeDistortionStrength: { value: 0.055 },
+    uWakeFoamTintStrength: { value: 0.18 },
     uFoamThreshold: { value: waterConfig.tuning.foamThreshold },
     uShorelineEnabled: { value: 1 },
     uIslandCount: { value: 0 },
@@ -651,9 +726,8 @@ export function createEnvironment(
     waterUniforms.uFresnelPower.value = waterPreset.fresnelPower;
     waterUniforms.uSpecularStrength.value = waterPreset.specularStrength;
     waterUniforms.uSpecularExponent.value = waterPreset.specularExponent;
-    waterUniforms.uWakeIntensity.value = waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity;
-    waterUniforms.uWakeLength.value = waterPreset.wakeLength;
-    waterUniforms.uWakeWidth.value = waterPreset.wakeWidth;
+    waterUniforms.uWakeDistortionStrength.value = 0.028 + waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity * 0.03;
+    waterUniforms.uWakeFoamTintStrength.value = 0.08 + waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity * 0.09;
     waterUniforms.uFoamThreshold.value = waterConfig.tuning.foamThreshold;
     waterUniforms.uShorelineEnabled.value = waterPreset.shorelineEnabled ? 1 : 0;
     waterUniforms.uShorelineStrength.value = waterPreset.shorelineStrength;
@@ -901,15 +975,46 @@ export function createEnvironment(
       water.position.set(context.cameraPosition.x, 0, context.cameraPosition.z);
       waterUniforms.uTime.value = context.renderTime;
       waterUniforms.uCameraPos.value.set(context.cameraPosition.x, context.cameraPosition.y, context.cameraPosition.z);
-      waterUniforms.uPlayerPos.value.set(context.playerPose.x, context.playerPose.z);
-      waterUniforms.uPlayerForward.value.set(Math.sin(context.playerPose.heading), Math.cos(context.playerPose.heading));
-      waterUniforms.uPlayerSpeedNorm.value = computeWakeIntensity(
-        context.playerPose.speed,
-        PLAYER_MAX_FORWARD_SPEED,
-        worldState.burst.active,
-        1
-      );
-      waterUniforms.uBurstFactor.value = worldState.burst.active ? 1 : 0;
+      const wakeInfluences = context.wakeInfluences ?? [];
+      const wakeCount = Math.min(WATER_MAX_WAKE_SOURCES, wakeInfluences.length);
+      waterUniforms.uWakeSourceCount.value = wakeCount;
+
+      for (let i = 0; i < WATER_MAX_WAKE_SOURCES; i += 1) {
+        const source = wakeSourceData[i];
+        const direction = wakeDirectionData[i];
+        const tuning = wakeTuningData[i];
+        const influence = i < wakeCount ? wakeInfluences[i] : undefined;
+
+        if (!source || !direction || !tuning) {
+          continue;
+        }
+
+        if (!influence) {
+          source.set(0, 0, 0, 0);
+          direction.set(0, 1, 0, 0);
+          tuning.set(0, 0, 1, 0);
+          continue;
+        }
+
+        source.set(
+          influence.sternX,
+          influence.sternZ,
+          Math.max(0, influence.intensity),
+          Math.max(0.001, influence.width)
+        );
+        direction.set(
+          influence.forwardX,
+          influence.forwardZ,
+          Math.max(0.001, influence.length),
+          influence.turn
+        );
+        tuning.set(
+          Math.max(0, influence.normalBoost),
+          Math.max(0, influence.foamTint),
+          Math.max(0.2, influence.falloff),
+          0
+        );
+      }
 
       let islandCount = 0;
       for (let i = 0; i < WATER_MAX_ISLANDS; i += 1) {

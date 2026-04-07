@@ -1,6 +1,8 @@
 import { Group, PerspectiveCamera, Scene, Vector3 } from "three";
 import { describe, expect, it, vi } from "vitest";
 import { createInitialWorldState, type EnemyState, type WorldState } from "../../simulation";
+import { createShipDefinition, createShipMesh } from "../objects/createShipMesh";
+import { createShipWakeController, createWakeDebugSurface } from "../wake/createShipWakeController";
 import {
   syncRenderFromSimulation,
   type RenderBridgeState,
@@ -39,12 +41,30 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
   const camera = new PerspectiveCamera(58, 16 / 9, 0.1, 400);
   camera.position.set(0, 8, -18);
 
+  const playerVisual = createShipMesh(createShipDefinition("player"));
+  scene.add(playerVisual.group);
+  const wakeRoot = new Group();
+  scene.add(wakeRoot);
+  const playerWakeController = createShipWakeController({
+    quality: "high",
+    sternOffset: playerVisual.definition.silhouette.hullLength * 0.5,
+    rootName: "wake-player-test"
+  });
+  wakeRoot.add(playerWakeController.getRoot());
+
   return {
     scene,
     camera,
-    playerMesh: new Group(),
+    playerMesh: playerVisual.group,
+    playerVisual,
+    wakeRoot,
+    wakeDebug: createWakeDebugSurface(),
+    playerWakeController,
+    enemyWakeControllers: new Map(),
+    wakeInfluencesScratch: [],
     enemyRoot: new Group(),
     enemyMeshes: new Map(),
+    enemyVisuals: new Map(),
     environment: {
       root: new Group(),
       syncFromWorld: environmentSync,
@@ -93,6 +113,7 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
     seenEnemyIds: new Set(),
     seenProjectileIds: new Set(),
     seenLootIds: new Set(),
+    knownProjectileOwners: new Map(),
     cameraDesiredPosition: new Vector3(),
     cameraDesiredLookTarget: new Vector3(),
     cameraLookTarget: new Vector3(),
@@ -104,15 +125,28 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
       z: 0,
       heading: 0,
       speed: 0,
-      drift: 0
+      drift: 0,
+      throttle: 0,
+      turnRate: 0
     },
     enemyPoseScratch: {
       x: 0,
       z: 0,
       heading: 0,
       speed: 0,
-      drift: 0
-    }
+      drift: 0,
+      throttle: 0,
+      turnRate: 0
+    },
+    enemyPoseCache: new Map(),
+    playerFx: {
+      hitFlashTimer: 0,
+      muzzleLeftTimer: 0,
+      muzzleRightTimer: 0
+    },
+    enemyFx: new Map(),
+    playerLastHp: 100,
+    enemyLastHp: new Map()
   };
 }
 
@@ -123,7 +157,8 @@ function createInterpolationContext(worldState: WorldState, alpha = 0.5): Render
       z: worldState.player.position.z,
       heading: worldState.player.heading,
       speed: worldState.player.speed,
-      drift: worldState.player.drift
+      drift: worldState.player.drift,
+      throttle: worldState.player.throttle
     },
     enemies: new Map(),
     projectiles: new Map(),
@@ -143,7 +178,7 @@ function normalizeAngle(angle: number): number {
   return wrapped;
 }
 
-describe("syncRenderFromSimulation interpolation", () => {
+describe("syncRenderFromSimulation interpolation and ship fx", () => {
   it("interpolates midpoint transforms for ships, projectiles, and loot", () => {
     const worldState = createInitialWorldState();
     worldState.player.position.x = 10;
@@ -151,10 +186,12 @@ describe("syncRenderFromSimulation interpolation", () => {
     worldState.player.heading = 0.6;
     worldState.player.speed = 8;
     worldState.player.drift = 2;
+    worldState.player.throttle = 1;
 
     const enemy = createEnemyState(1, 14, -6, 0.9);
     enemy.speed = 6;
     enemy.drift = 1.1;
+    enemy.throttle = 0.8;
     worldState.enemies.push(enemy);
 
     worldState.projectiles.push({
@@ -183,14 +220,16 @@ describe("syncRenderFromSimulation interpolation", () => {
       z: 0,
       heading: 0,
       speed: 0,
-      drift: 0
+      drift: 0,
+      throttle: 0
     };
     interpolation.previousSnapshot.enemies.set(enemy.id, {
       x: 2,
       z: -2,
       heading: 0.1,
       speed: 0,
-      drift: 0
+      drift: 0,
+      throttle: 0
     });
     interpolation.previousSnapshot.projectiles.set(1, { x: 2, z: 0 });
     interpolation.previousSnapshot.loot.set(1, { x: 0, z: -2 });
@@ -308,5 +347,114 @@ describe("syncRenderFromSimulation interpolation", () => {
 
     expect(deltas.length).toBeGreaterThan(0);
     expect(Math.max(...deltas)).toBeLessThan(0.09);
+  });
+
+  it("applies bob, roll, pitch, and wake from movement state", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.speed = 12;
+    worldState.player.drift = 3;
+    worldState.player.throttle = 1;
+    worldState.player.heading = 0.62;
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    interpolation.previousSnapshot.player.heading = 0.2;
+    interpolation.previousSnapshot.player.throttle = 0;
+
+    const environmentSync = vi.fn();
+    const bridge = createBridge(environmentSync);
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+
+    expect(Math.abs(bridge.playerMesh.rotation.x)).toBeGreaterThan(0.02);
+    expect(Math.abs(bridge.playerMesh.rotation.z)).toBeGreaterThan(0.03);
+    const call = environmentSync.mock.calls.at(-1);
+    const wakeInfluences = call?.[1]?.wakeInfluences as Array<{ intensity: number }> | undefined;
+    expect((wakeInfluences?.length ?? 0)).toBeGreaterThan(0);
+    expect(wakeInfluences?.[0]?.intensity ?? 0).toBeGreaterThan(0.05);
+  });
+
+  it("triggers hit flash on hp loss", () => {
+    const worldState = createInitialWorldState();
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    worldState.player.hp = 70;
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+
+    expect(bridge.playerFx.hitFlashTimer).toBeGreaterThan(0);
+    const firstChannel = bridge.playerVisual.flashChannels[0];
+    expect(firstChannel).toBeDefined();
+    if (!firstChannel) {
+      return;
+    }
+    expect(firstChannel.material.emissiveIntensity).toBeGreaterThan(firstChannel.baseEmissiveIntensity);
+  });
+
+  it("triggers side-aware cannon muzzle fx from new projectile spawns", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.position.x = 0;
+    worldState.player.position.z = 0;
+    worldState.player.heading = 0;
+
+    const enemy = createEnemyState(1, 8, 0, 0);
+    worldState.enemies.push(enemy);
+
+    worldState.projectiles.push({
+      id: 1,
+      owner: "player",
+      position: { x: 2.8, z: 1.2 },
+      velocity: { x: 0, z: 0 },
+      lifetime: 2,
+      active: true
+    });
+    worldState.projectiles.push({
+      id: 2,
+      owner: "enemy",
+      position: { x: 9.4, z: 0.8 },
+      velocity: { x: 0, z: 0 },
+      lifetime: 2,
+      active: true
+    });
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+
+    expect(bridge.playerFx.muzzleLeftTimer).toBeGreaterThan(0);
+    expect(bridge.playerVisual.muzzleLeft.group.visible).toBe(true);
+
+    const enemyFx = bridge.enemyFx.get(enemy.id);
+    expect(enemyFx).toBeDefined();
+    expect(enemyFx?.muzzleLeftTimer ?? 0).toBeGreaterThan(0);
+    const enemyVisual = bridge.enemyVisuals.get(enemy.id);
+    expect(enemyVisual?.muzzleLeft.group.visible ?? false).toBe(true);
+  });
+
+  it("shows wake for moving enemies and decays when they stop", () => {
+    const worldState = createInitialWorldState();
+    const enemy = createEnemyState(1, 12, 4, 0.4);
+    enemy.speed = 9;
+    worldState.enemies.push(enemy);
+    worldState.player.speed = 9;
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    const environmentSync = vi.fn();
+    const bridge = createBridge(environmentSync);
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+
+    const firstCall = environmentSync.mock.calls.at(-1);
+    const firstWake = firstCall?.[1]?.wakeInfluences as Array<{ intensity: number }> | undefined;
+    expect((firstWake?.length ?? 0)).toBeGreaterThan(1);
+    expect((firstWake ?? []).some((wake) => wake.intensity > 0.05)).toBe(true);
+
+    worldState.player.speed = 0;
+    enemy.speed = 0;
+    for (let i = 0; i < 130; i += 1) {
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+
+    const lastCall = environmentSync.mock.calls.at(-1);
+    const lastWake = lastCall?.[1]?.wakeInfluences as Array<{ intensity: number }> | undefined;
+    expect((lastWake?.length ?? 0)).toBeLessThanOrEqual(1);
   });
 });

@@ -9,6 +9,18 @@ export type {
   RenderShipSnapshot
 } from "./adapters/renderBridge";
 export { createRenderWorld } from "./createRenderWorld";
+export { createShipDefinition } from "./objects/createShipMesh";
+export type { ShipAssetSource, ShipClass, ShipDefinition, ShipSilhouette, ShipVisualRole } from "./objects/createShipMesh";
+export { createShipWakeController } from "./wake/createShipWakeController";
+export { createWakeDebugSurface, getWakeGlobalTuning, updateWakeGlobalTuning } from "./wake/createShipWakeController";
+export type {
+  ShipWakeController,
+  WakeDebugSurface,
+  WakeQualityLevel,
+  WakeSample,
+  WakeShaderInfluence,
+  WakeTuningControls
+} from "./wake/createShipWakeController";
 export type { WaterQualityLevel, WaterRenderConfig, WaterTuningControls } from "./water/waterConfig";
 export type {
   AtmosphereDebugSnapshot,
