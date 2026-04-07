@@ -295,12 +295,11 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     expect(Math.abs(yAtAlpha1 - yAtAlpha0)).toBeGreaterThan(0.0001);
   });
 
-  it("dampens camera heading jitter around deadzone oscillations", () => {
+  it("tracks camera heading directly during small oscillations", () => {
     const worldState = createInitialWorldState();
     const interpolation = createInterpolationContext(worldState, 1);
     const bridge = createBridge();
 
-    const smoothedSamples: number[] = [];
     let previousHeading = 0;
 
     for (let i = 0; i < 16; i += 1) {
@@ -308,45 +307,27 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
       interpolation.previousSnapshot.player.heading = previousHeading;
       worldState.player.heading = heading;
       syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
-      smoothedSamples.push(bridge.cameraSmoothedHeading);
+      expect(Math.abs(normalizeAngle(bridge.cameraSmoothedHeading - heading))).toBeLessThan(1e-6);
       previousHeading = heading;
     }
-
-    const maxAbsSmoothed = Math.max(...smoothedSamples.map((value) => Math.abs(value)));
-    let maxFrameDelta = 0;
-    for (let i = 1; i < smoothedSamples.length; i += 1) {
-      maxFrameDelta = Math.max(maxFrameDelta, Math.abs(smoothedSamples[i]! - smoothedSamples[i - 1]!));
-    }
-
-    expect(maxAbsSmoothed).toBeLessThan(0.015);
-    expect(maxFrameDelta).toBeLessThan(0.015);
   });
 
-  it("keeps camera heading step bounded during sustained turning", () => {
+  it("keeps camera heading in lockstep during sustained turning", () => {
     const worldState = createInitialWorldState();
     const interpolation = createInterpolationContext(worldState, 1);
     const bridge = createBridge();
 
     let previousHeading = 0;
-    const deltas: number[] = [];
 
     for (let i = 0; i < 12; i += 1) {
       worldState.player.heading = previousHeading + 0.14;
       interpolation.previousSnapshot.player.heading = previousHeading;
 
-      const smoothedBefore = bridge.cameraSmoothedHeading;
       syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
-      const smoothedAfter = bridge.cameraSmoothedHeading;
-
-      if (i > 0) {
-        deltas.push(Math.abs(normalizeAngle(smoothedAfter - smoothedBefore)));
-      }
+      expect(Math.abs(normalizeAngle(bridge.cameraSmoothedHeading - worldState.player.heading))).toBeLessThan(1e-6);
 
       previousHeading = worldState.player.heading;
     }
-
-    expect(deltas.length).toBeGreaterThan(0);
-    expect(Math.max(...deltas)).toBeLessThan(0.09);
   });
 
   it("keeps an upright camera basis and unflipped projection while turning", () => {
@@ -485,6 +466,44 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     const enemyVisual = bridge.enemyVisuals.get(enemy.id);
     expect(enemyVisual?.muzzleLeft.group.visible ?? false).toBe(true);
     expect(enemyVisual?.muzzleRight.group.visible ?? false).toBe(true);
+  });
+
+  it("routes single-shot muzzle fx to the side that matches projectile spawn position", () => {
+    const leftWorld = createInitialWorldState();
+    leftWorld.player.position.x = 0;
+    leftWorld.player.position.z = 0;
+    leftWorld.player.heading = 0;
+    leftWorld.projectiles.push({
+      id: 1,
+      owner: "player",
+      position: { x: -2.8, z: 1.2 },
+      velocity: { x: 0, z: 0 },
+      lifetime: 2,
+      active: true
+    });
+
+    const leftBridge = createBridge();
+    syncRenderFromSimulation(leftWorld, leftBridge, 1 / 60, createInterpolationContext(leftWorld, 1));
+    expect(leftBridge.playerFx.muzzleLeftTimer).toBeGreaterThan(0);
+    expect(leftBridge.playerFx.muzzleRightTimer).toBe(0);
+
+    const rightWorld = createInitialWorldState();
+    rightWorld.player.position.x = 0;
+    rightWorld.player.position.z = 0;
+    rightWorld.player.heading = 0;
+    rightWorld.projectiles.push({
+      id: 1,
+      owner: "player",
+      position: { x: 2.8, z: 1.2 },
+      velocity: { x: 0, z: 0 },
+      lifetime: 2,
+      active: true
+    });
+
+    const rightBridge = createBridge();
+    syncRenderFromSimulation(rightWorld, rightBridge, 1 / 60, createInterpolationContext(rightWorld, 1));
+    expect(rightBridge.playerFx.muzzleLeftTimer).toBe(0);
+    expect(rightBridge.playerFx.muzzleRightTimer).toBeGreaterThan(0);
   });
 
   it("shows wake for moving enemies and decays when they stop", () => {

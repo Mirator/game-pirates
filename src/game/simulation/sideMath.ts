@@ -25,7 +25,7 @@ export function sideDotAgainstShipLeft(heading: number, relativeX: number, relat
 }
 
 export function classifySideFromLeftDot(sideDot: number): CannonSide {
-  return sideDot <= 0 ? "left" : "right";
+  return sideDot >= 0 ? "left" : "right";
 }
 
 export function classifyRelativeSide(heading: number, relativeX: number, relativeZ: number): CannonSide {

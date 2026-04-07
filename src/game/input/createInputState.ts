@@ -109,7 +109,6 @@ export function createInputState(target: Window = window): InputController {
 
   const syncState = (): void => {
     state.throttle = clampAxis(keyState.backward, keyState.forward);
-    // Preserve screen-intuitive steering under the chase-camera orientation.
     state.turn = clampAxis(keyState.right, keyState.left);
     state.fireLeft = keyState.fireLeft;
     state.fireRight = keyState.fireRight;
@@ -118,7 +117,7 @@ export function createInputState(target: Window = window): InputController {
     state.burst = keyState.burst;
   };
 
-const setKey = (code: string, key: string, pressed: boolean, repeat: boolean): boolean => {
+  const setKey = (code: string, key: string, pressed: boolean, repeat: boolean): boolean => {
     // Physical key positions are canonical for movement/fire controls.
     if (setByCode(keyState, code, pressed, repeat)) {
       return true;

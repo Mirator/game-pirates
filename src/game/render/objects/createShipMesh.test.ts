@@ -55,4 +55,22 @@ describe("createShipMesh ship factory", () => {
     expect(key(player)).not.toBe(key(merchant));
     expect(key(player)).not.toBe(key(navy));
   });
+
+  it("orients muzzle fx outward on both left and right sides", () => {
+    const visual = createShipMesh(createShipDefinition("player"));
+    const leftFlash = visual.group.getObjectByName("ship-muzzle-left-flash");
+    const rightFlash = visual.group.getObjectByName("ship-muzzle-right-flash");
+    const leftSmoke = visual.group.getObjectByName("ship-muzzle-left-smoke");
+    const rightSmoke = visual.group.getObjectByName("ship-muzzle-right-smoke");
+
+    expect(leftFlash).toBeTruthy();
+    expect(rightFlash).toBeTruthy();
+    expect(leftSmoke).toBeTruthy();
+    expect(rightSmoke).toBeTruthy();
+
+    expect(leftFlash?.position.x ?? 0).toBeLessThan(0);
+    expect(rightFlash?.position.x ?? 0).toBeGreaterThan(0);
+    expect(leftSmoke?.position.x ?? 0).toBeLessThan(0);
+    expect(rightSmoke?.position.x ?? 0).toBeGreaterThan(0);
+  });
 });

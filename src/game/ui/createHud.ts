@@ -151,6 +151,10 @@ function getIslandMinimapColor(kind: string): string {
   }
 }
 
+export function worldHeadingToMinimapRotation(heading: number): number {
+  return -heading;
+}
+
 function resolvePrompt(worldState: WorldState): PromptInfo {
   if (worldState.port.menuOpen) {
     return {
@@ -331,7 +335,7 @@ function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): void {
 
   ctx.save();
   ctx.translate(playerX, playerY);
-  ctx.rotate(-player.heading);
+  ctx.rotate(worldHeadingToMinimapRotation(player.heading));
   ctx.strokeStyle = "rgba(247, 248, 250, 0.86)";
   ctx.lineWidth = 1.3;
   ctx.beginPath();

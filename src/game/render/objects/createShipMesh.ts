@@ -290,10 +290,11 @@ function createSailGeometry(shape: SailShape, width: number, height: number): Pl
   return new ShapeGeometry(sailShape);
 }
 
-function createMuzzleFx(name: string): ShipMuzzleFx {
+function createMuzzleFx(name: string, side: "left" | "right"): ShipMuzzleFx {
   const group = new Group();
   group.name = name;
   group.visible = false;
+  const direction = side === "left" ? -1 : 1;
 
   const flashMaterial = new MeshStandardMaterial({
     color: "#ffd8a2",
@@ -316,14 +317,14 @@ function createMuzzleFx(name: string): ShipMuzzleFx {
 
   const flash = enableShadows(new Mesh(new ConeGeometry(0.2, 0.6, 6), flashMaterial));
   flash.name = `${name}-flash`;
-  flash.rotation.z = Math.PI * 0.5;
-  flash.position.x = 0.22;
+  flash.rotation.z = direction * Math.PI * 0.5;
+  flash.position.x = 0.22 * direction;
   group.add(flash);
 
   const smoke = enableShadows(new Mesh(new ConeGeometry(0.26, 0.78, 5), smokeMaterial));
   smoke.name = `${name}-smoke`;
-  smoke.rotation.z = Math.PI * 0.5;
-  smoke.position.x = 0.3;
+  smoke.rotation.z = direction * Math.PI * 0.5;
+  smoke.position.x = 0.3 * direction;
   smoke.position.y = 0.04;
   group.add(smoke);
 
@@ -682,11 +683,11 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   wakeSpray.visible = false;
   group.add(wakeSpray);
 
-  const muzzleLeft = createMuzzleFx("ship-muzzle-left");
+  const muzzleLeft = createMuzzleFx("ship-muzzle-left", "left");
   muzzleLeft.group.position.set(-silhouette.hullWidth * 0.5 - 0.45, mountY + 0.05, 0);
   group.add(muzzleLeft.group);
 
-  const muzzleRight = createMuzzleFx("ship-muzzle-right");
+  const muzzleRight = createMuzzleFx("ship-muzzle-right", "right");
   muzzleRight.group.position.set(silhouette.hullWidth * 0.5 + 0.45, mountY + 0.05, 0);
   group.add(muzzleRight.group);
 

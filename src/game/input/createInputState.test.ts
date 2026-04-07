@@ -74,7 +74,7 @@ describe("createInputState", () => {
     expect(controller.state.burst).toBe(false);
   });
 
-  it("maps A/D to opposite signed turn inputs for mirrored chase-camera steering", () => {
+  it("maps A/D to mirrored chase-camera turn inputs", () => {
     const target = new MockWindowTarget();
     const controller = createInputState(target as unknown as Window);
 

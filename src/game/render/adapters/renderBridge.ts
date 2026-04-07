@@ -662,20 +662,8 @@ export function syncRenderFromSimulation(
     bridge.lootMeshes.delete(id);
   }
 
-  const headingDeadzone = 0.03;
-  if (!bridge.cameraHeadingInitialized) {
-    bridge.cameraSmoothedHeading = Math.abs(playerPose.heading) <= headingDeadzone ? 0 : playerPose.heading;
-    bridge.cameraHeadingInitialized = true;
-  }
-
-  let headingDelta = normalizeAngle(playerPose.heading - bridge.cameraSmoothedHeading);
-  if (Math.abs(headingDelta) <= headingDeadzone) {
-    headingDelta = 0;
-  } else {
-    headingDelta = Math.sign(headingDelta) * (Math.abs(headingDelta) - headingDeadzone);
-  }
-  const headingFollowStrength = 1 - Math.exp(-4.8 * frameDt);
-  bridge.cameraSmoothedHeading = normalizeAngle(bridge.cameraSmoothedHeading + headingDelta * headingFollowStrength);
+  bridge.cameraSmoothedHeading = playerPose.heading;
+  bridge.cameraHeadingInitialized = true;
 
   const cameraForwardX = Math.sin(bridge.cameraSmoothedHeading);
   const cameraForwardZ = Math.cos(bridge.cameraSmoothedHeading);
