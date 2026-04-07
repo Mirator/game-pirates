@@ -25,4 +25,8 @@ Phase 2 browser prototype for the pirate game design:
 - `npm run dev`: start local dev server
 - `npm run build`: type-check and production build
 - `npm run test`: run simulation unit tests
-- `npm run test:e2e`: run Playwright browser smoke tests
+- `npm run test:e2e`: run Playwright browser smoke tests (CPU-capped, single worker by default)
+- `npm run test:e2e:fast`: run Playwright tests with 50% worker parallelism
+
+For custom caps you can set `E2E_WORKERS`, for example:
+- PowerShell: `$env:E2E_WORKERS=2; npm run test:e2e`
