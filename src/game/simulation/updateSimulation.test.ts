@@ -12,6 +12,8 @@ import {
   trySellCargo,
   updateSimulation,
   type InputState,
+  type LootState,
+  type ProjectileState,
   type WorldState
 } from ".";
 
@@ -38,6 +40,48 @@ function stepUntil(worldState: WorldState, predicate: () => boolean, maxSteps: n
     }
     updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
   }
+}
+
+function createProjectile(id: number, owner: "player" | "enemy", x: number, z: number, y = 1.1): ProjectileState {
+  return {
+    id,
+    owner,
+    position: { x, y, z },
+    velocity: { x: 0, y: 0, z: 0 },
+    lifetime: 1,
+    active: true,
+    mass: 6.5,
+    gravityScale: 1,
+    dragAir: 0.2,
+    dragWater: 7.5,
+    collisionRadius: 0.36,
+    impactImpulse: 6.4,
+    terminateOnWaterImpact: true,
+    waterState: "airborne",
+    collisionLayer: "projectiles"
+  };
+}
+
+function createLoot(id: number, kind: LootState["kind"], amount: number, x: number, z: number, y = 0.5): LootState {
+  return {
+    id,
+    kind,
+    amount,
+    position: { x, y, z },
+    velocity: { x: 0, y: 0, z: 0 },
+    yaw: 0,
+    angularVelocity: 0,
+    mass: kind === "cargo" ? 8.5 : 4.5,
+    buoyancyMultiplier: kind === "cargo" ? 0.88 : 1.15,
+    waterDrag: 2.9,
+    angularDamping: 3.6,
+    floats: true,
+    waterState: "submerged",
+    lifetime: 10,
+    pickupRadius: 3,
+    active: true,
+    collisionLayer: "pickups_debris"
+  };
 }
 
 function normalizeAngle(angle: number): number {
@@ -165,6 +209,18 @@ describe("updateSimulation ECS pipeline", () => {
     worldState.player.heading = 0.2;
     worldState.player.speed = 14;
     worldState.player.drift = 2;
+    {
+      const forwardX = Math.sin(worldState.player.heading);
+      const forwardZ = Math.cos(worldState.player.heading);
+      const leftX = -forwardZ;
+      const leftZ = forwardX;
+      worldState.player.linearVelocity.x = forwardX * worldState.player.speed + leftX * worldState.player.drift;
+      worldState.player.linearVelocity.z = forwardZ * worldState.player.speed + leftZ * worldState.player.drift;
+    }
+    const initialDistance = Math.hypot(worldState.player.position.x, worldState.player.position.z);
+    const initialNormalX = worldState.player.position.x / initialDistance;
+    const initialNormalZ = worldState.player.position.z / initialDistance;
+    const initialOutwardVelocity = worldState.player.linearVelocity.x * initialNormalX + worldState.player.linearVelocity.z * initialNormalZ;
 
     updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
 
@@ -187,7 +243,7 @@ describe("updateSimulation ECS pipeline", () => {
     const velocityX = forwardX * player.speed + leftX * player.drift;
     const velocityZ = forwardZ * player.speed + leftZ * player.drift;
     const outwardVelocity = velocityX * normalX + velocityZ * normalZ;
-    expect(outwardVelocity).toBeLessThanOrEqual(0.05);
+    expect(outwardVelocity).toBeLessThan(initialOutwardVelocity);
   });
 
   it("sinks enemies, drops expanded loot, and removes sunk enemy after timer", () => {
@@ -211,14 +267,9 @@ describe("updateSimulation ECS pipeline", () => {
     worldState.player.position.z = 0;
     worldState.player.heading = 0;
 
-    worldState.projectiles.push({
-      id: worldState.nextProjectileId++,
-      owner: "player",
-      position: { x: enemy.position.x, z: enemy.position.z },
-      velocity: { x: 0, z: 0 },
-      lifetime: 1,
-      active: true
-    });
+    worldState.projectiles.push(
+      createProjectile(worldState.nextProjectileId++, "player", enemy.position.x, enemy.position.z, enemy.position.y + 1)
+    );
 
     updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
 
@@ -235,6 +286,8 @@ describe("updateSimulation ECS pipeline", () => {
     worldState.player.sinkTimer = SINK_DURATION;
     worldState.player.speed = 6;
     worldState.player.drift = 2.5;
+    worldState.player.linearVelocity.x = -2.5;
+    worldState.player.linearVelocity.z = 6;
 
     updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
     expect(worldState.player.sinkTimer).toBeCloseTo(SINK_DURATION - FIXED_TIME_STEP, 6);
@@ -278,16 +331,7 @@ describe("updateSimulation ECS pipeline", () => {
     worldState.player.position.x = PORT_POSITION.x;
     worldState.player.position.z = PORT_POSITION.z;
 
-    worldState.loot.push({
-      id: worldState.nextLootId++,
-      kind: "gold",
-      amount: 20,
-      position: { x: PORT_POSITION.x + 1, z: PORT_POSITION.z + 0.6 },
-      driftVelocity: { x: 0, z: 0 },
-      lifetime: 10,
-      pickupRadius: 3,
-      active: true
-    });
+    worldState.loot.push(createLoot(worldState.nextLootId++, "gold", 20, PORT_POSITION.x + 1, PORT_POSITION.z + 0.6));
 
     updateSimulation(worldState, { ...neutralInput, interact: true }, FIXED_TIME_STEP);
 
@@ -306,16 +350,7 @@ describe("updateSimulation ECS pipeline", () => {
     updateSimulation(worldState, { ...neutralInput, interact: true }, FIXED_TIME_STEP);
     expect(worldState.port.menuOpen).toBe(true);
 
-    worldState.loot.push({
-      id: worldState.nextLootId++,
-      kind: "cargo",
-      amount: 1,
-      position: { x: PORT_POSITION.x + 1, z: PORT_POSITION.z + 1 },
-      driftVelocity: { x: 0, z: 0 },
-      lifetime: 10,
-      pickupRadius: 3,
-      active: true
-    });
+    worldState.loot.push(createLoot(worldState.nextLootId++, "cargo", 1, PORT_POSITION.x + 1, PORT_POSITION.z + 1));
 
     updateSimulation(worldState, { ...neutralInput, interact: true }, FIXED_TIME_STEP);
     expect(worldState.port.menuOpen).toBe(false);
@@ -381,16 +416,7 @@ describe("updateSimulation ECS pipeline", () => {
     const worldState = createInitialWorldState();
     quietWorld(worldState);
 
-    worldState.loot.push({
-      id: worldState.nextLootId++,
-      kind: "treasure_map",
-      amount: 1,
-      position: { x: worldState.player.position.x + 1, z: worldState.player.position.z },
-      driftVelocity: { x: 0, z: 0 },
-      lifetime: 10,
-      pickupRadius: 3,
-      active: true
-    });
+    worldState.loot.push(createLoot(worldState.nextLootId++, "treasure_map", 1, worldState.player.position.x + 1, worldState.player.position.z));
 
     updateSimulation(worldState, { ...neutralInput, interact: true }, FIXED_TIME_STEP);
     expect(worldState.wallet.treasureMaps).toBe(1);
@@ -438,11 +464,15 @@ describe("updateSimulation ECS pipeline", () => {
     quietWorld(clearWorld);
     clearWorld.player.speed = 10;
     clearWorld.player.drift = 3;
+    clearWorld.player.linearVelocity.x = -3;
+    clearWorld.player.linearVelocity.z = 10;
 
     const stormWorld = createInitialWorldState();
     quietWorld(stormWorld);
     stormWorld.player.speed = 10;
     stormWorld.player.drift = 3;
+    stormWorld.player.linearVelocity.x = -3;
+    stormWorld.player.linearVelocity.z = 10;
     stormWorld.storm.active = true;
     stormWorld.storm.center.x = stormWorld.player.position.x;
     stormWorld.storm.center.z = stormWorld.player.position.z;

@@ -21,7 +21,7 @@ import {
   type ShipState,
   type WorldState
 } from "../../simulation";
-import { classifyRelativeSide } from "../../simulation/sideMath";
+import { calculateForwardVector as calculateForward, calculateLeftVector as calculateLeft, classifyRelativeSide } from "../../simulation/sideMath";
 import type { EnvironmentObjects } from "../objects/createEnvironment";
 import { createShipDefinition, createShipMesh, type ShipVisual, type ShipVisualRole } from "../objects/createShipMesh";
 import {
@@ -42,8 +42,11 @@ const WAKE_FORWARD_SCRATCH = new Vector3();
 
 export interface RenderShipSnapshot {
   x: number;
+  y?: number;
   z: number;
   heading: number;
+  pitch?: number;
+  roll?: number;
   speed: number;
   drift: number;
   throttle: number;
@@ -51,6 +54,7 @@ export interface RenderShipSnapshot {
 
 export interface RenderPositionSnapshot {
   x: number;
+  y?: number;
   z: number;
 }
 
@@ -69,8 +73,11 @@ export interface RenderInterpolationContext {
 
 interface InterpolatedShipPose {
   x: number;
+  y?: number;
   z: number;
   heading: number;
+  pitch?: number;
+  roll?: number;
   speed: number;
   drift: number;
   throttle: number;
@@ -198,6 +205,16 @@ function shortestAngleLerp(from: number, to: number, alpha: number): number {
   return normalizeAngle(from + delta * alpha);
 }
 
+function getShipSpeed(ship: ShipState): number {
+  const forward = calculateForward(ship.heading);
+  return ship.linearVelocity.x * forward.x + ship.linearVelocity.z * forward.z;
+}
+
+function getShipDrift(ship: ShipState): number {
+  const left = calculateLeft(ship.heading);
+  return ship.linearVelocity.x * left.x + ship.linearVelocity.z * left.z;
+}
+
 function setInterpolatedShipPose(
   ship: ShipState,
   previous: RenderShipSnapshot | undefined,
@@ -207,28 +224,37 @@ function setInterpolatedShipPose(
 ): void {
   if (!previous) {
     target.x = ship.position.x;
+    target.y = ship.position.y;
     target.z = ship.position.z;
     target.heading = ship.heading;
-    target.speed = ship.speed;
-    target.drift = ship.drift;
+    target.pitch = ship.pitch;
+    target.roll = ship.roll;
+    target.speed = getShipSpeed(ship);
+    target.drift = getShipDrift(ship);
     target.throttle = ship.throttle;
     target.turnRate = 0;
     return;
   }
 
   target.x = lerp(previous.x, ship.position.x, alpha);
+  target.y = lerp(previous.y ?? ship.position.y, ship.position.y, alpha);
   target.z = lerp(previous.z, ship.position.z, alpha);
   target.heading = shortestAngleLerp(previous.heading, ship.heading, alpha);
-  target.speed = lerp(previous.speed, ship.speed, alpha);
-  target.drift = lerp(previous.drift, ship.drift, alpha);
+  target.pitch = lerp(previous.pitch ?? ship.pitch, ship.pitch, alpha);
+  target.roll = lerp(previous.roll ?? ship.roll, ship.roll, alpha);
+  target.speed = lerp(previous.speed, getShipSpeed(ship), alpha);
+  target.drift = lerp(previous.drift, getShipDrift(ship), alpha);
   target.throttle = lerp(previous.throttle, ship.throttle, alpha);
   target.turnRate = normalizeAngle(ship.heading - previous.heading) / Math.max(1e-5, fixedStep);
 }
 
 function copyPose(target: InterpolatedShipPose, source: InterpolatedShipPose): void {
   target.x = source.x;
+  target.y = source.y ?? 0;
   target.z = source.z;
   target.heading = source.heading;
+  target.pitch = source.pitch ?? 0;
+  target.roll = source.roll ?? 0;
   target.speed = source.speed;
   target.drift = source.drift;
   target.throttle = source.throttle;
@@ -239,19 +265,18 @@ function applyShipPose(ship: ShipState, pose: InterpolatedShipPose, visual: Ship
   const sinkProgress = ship.status === "sinking" ? (SINK_DURATION - ship.sinkTimer) / SINK_DURATION : 0;
   const sinkOffset = -Math.max(0, sinkProgress) * 2.2;
   const speedAbs = Math.abs(pose.speed);
-  const bobAmplitude = 0.02 + clamp(speedAbs * 0.003, 0, 0.06);
-  const bob = Math.sin(renderTime * 2.1 + pose.x * 0.05 + pose.z * 0.04) * bobAmplitude;
+  const bob = Math.sin(renderTime * 2.1 + pose.x * 0.05 + pose.z * 0.04) * (0.01 + clamp(speedAbs * 0.00075, 0, 0.015));
 
-  const rollFromDrift = clamp(pose.drift * 0.024, -0.22, 0.22);
+  const rollFromDrift = clamp(pose.drift * 0.02, -0.18, 0.18);
   const leanFromTurn = clamp(-pose.turnRate * 0.032, -0.16, 0.16);
-  const pitchFromInput = clamp(-pose.throttle * 0.08 + pose.speed * 0.004, -0.14, 0.14);
-  const pitchFromWave = Math.sin(renderTime * 1.7 + pose.z * 0.03) * 0.02;
+  const pitchFromInput = clamp(-pose.throttle * 0.06 + pose.speed * 0.003, -0.12, 0.12);
+  const pitchFromWave = Math.sin(renderTime * 1.7 + pose.z * 0.03) * 0.01;
 
-  visual.group.position.set(pose.x, sinkOffset + bob, pose.z);
+  visual.group.position.set(pose.x, (pose.y ?? ship.position.y) + sinkOffset + bob, pose.z);
   visual.group.rotation.set(
-    pitchFromInput + pitchFromWave,
+    (pose.pitch ?? ship.pitch) + pitchFromInput + pitchFromWave,
     pose.heading,
-    rollFromDrift + leanFromTurn + sinkProgress * 0.24
+    (pose.roll ?? ship.roll) + rollFromDrift + leanFromTurn + sinkProgress * 0.24
   );
 }
 
@@ -364,7 +389,7 @@ function chooseMuzzleMount(visual: ShipVisual, side: CannonSide, projectile: Pro
 
   visual.group.updateMatrixWorld(true);
   const localProjectile = visual.group.worldToLocal(
-    new Vector3(projectile.position.x, visual.group.position.y + 1, projectile.position.z)
+    new Vector3(projectile.position.x, projectile.position.y, projectile.position.z)
   );
 
   let bestMount = defaultMount;
@@ -507,8 +532,11 @@ export function syncRenderFromSimulation(
     if (!cachedPose) {
       cachedPose = {
         x: 0,
+        y: 0,
         z: 0,
         heading: 0,
+        pitch: 0,
+        roll: 0,
         speed: 0,
         drift: 0,
         throttle: 0,
@@ -563,8 +591,9 @@ export function syncRenderFromSimulation(
 
     const previousProjectile = interpolation.previousSnapshot.projectiles.get(projectile.id);
     const projectileX = previousProjectile ? lerp(previousProjectile.x, projectile.position.x, alpha) : projectile.position.x;
+    const projectileY = previousProjectile ? lerp(previousProjectile.y ?? projectile.position.y, projectile.position.y, alpha) : projectile.position.y;
     const projectileZ = previousProjectile ? lerp(previousProjectile.z, projectile.position.z, alpha) : projectile.position.z;
-    projectileMesh.position.set(projectileX, 1.06, projectileZ);
+    projectileMesh.position.set(projectileX, projectileY, projectileZ);
     seenProjectiles.add(projectile.id);
   }
 
@@ -652,8 +681,9 @@ export function syncRenderFromSimulation(
 
     const previousLoot = interpolation.previousSnapshot.loot.get(loot.id);
     const lootX = previousLoot ? lerp(previousLoot.x, loot.position.x, alpha) : loot.position.x;
+    const lootY = previousLoot ? lerp(previousLoot.y ?? loot.position.y, loot.position.y, alpha) : loot.position.y;
     const lootZ = previousLoot ? lerp(previousLoot.z, loot.position.z, alpha) : loot.position.z;
-    lootMesh.position.set(lootX, 0.65 + Math.sin(renderTime * 3.6 + loot.id * 0.8) * 0.16, lootZ);
+    lootMesh.position.set(lootX, lootY + Math.sin(renderTime * 3.6 + loot.id * 0.8) * 0.08, lootZ);
     lootMesh.rotation.y = renderTime * 1.5 + loot.id * 0.35;
     seenLoot.add(loot.id);
   }
@@ -668,7 +698,7 @@ export function syncRenderFromSimulation(
     bridge.lootMeshes.delete(id);
   }
 
-  bridge.cameraSmoothedHeading = playerPose.heading;
+  bridge.cameraSmoothedHeading = worldState.player.heading;
   bridge.cameraHeadingInitialized = true;
 
   const cameraForwardX = Math.sin(bridge.cameraSmoothedHeading);

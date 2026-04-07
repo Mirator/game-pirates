@@ -15,6 +15,7 @@ Cross-spec dependencies:
 - Spec 06: Technical Architecture (render-only ownership for visual feedback).
 - Spec 08: Stylized Ocean Rendering (lighting/water compatibility).
 - Spec 10: Stylized Ship Wake Rendering System (wake architecture and tuning).
+- Spec 11: Gravity-Based Physics System (authoritative ship/projectile physics).
 
 V1 scope note:
 - Ship rendering uses procedural meshes for now.
@@ -108,6 +109,12 @@ Required motion behaviors:
 - forward motion feedback.
 
 Ships should not appear rigidly attached to the world.
+
+Motion source contract:
+
+- Ship visual pose should consume simulation-authoritative physics state
+  (position, heading, pitch, roll, velocity-derived cues), not independent fake
+  locomotion.
 
 ## 5. Interaction Feedback
 

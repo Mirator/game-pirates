@@ -33,6 +33,8 @@ The world can read as unlit geometry rather than a composed scene.
 
 - This spec is the canonical render contract for scene lighting, sky,
   atmosphere, and ocean response.
+- Gameplay physics authority (gravity, buoyancy, projectile motion, collision)
+  remains in Spec 11 and simulation systems.
 - High-level visual style remains aligned with Spec 05 (art direction), while
   concrete rendering behavior lives here.
 - Rendering upgrades must remain visual-only and must not change gameplay
@@ -247,6 +249,8 @@ The ocean must present:
 - MVP shoreline response uses island proximity masks (island center/radius
   based).
 - Shoreline regions must blend toward shallow-water color.
+- Water-height sampling used by rendering must stay compatible with the
+  simulation water sampler contract from Spec 11.
 - Future optional path: depth-texture shoreline refinement.
 
 #### 5) Ship Interaction

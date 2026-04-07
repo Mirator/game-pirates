@@ -11,6 +11,10 @@ Use the spec index as the canonical source of truth.
 - [Progression UX Art Audio](specs/05-progression-ux-art-audio.md)
 - [Technical Architecture](specs/06-technical-architecture.md)
 - [Roadmap and Scope Guardrails](specs/07-roadmap-and-scope-guardrails.md)
+- [Stylized Ocean Rendering](specs/08-stylized-ocean-rendering.md)
+- [Ship Visual Representation Upgrade](specs/09-ship-visual-and-gameplay-representation-upgrade.md)
+- [Ship Wake Rendering System](specs/10-ship-wake-rendering-system.md)
+- [Gravity-Based Physics System](specs/11-gravity-based-physics-system.md)
 
 ## Working Title
 

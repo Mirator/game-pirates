@@ -1,111 +1,98 @@
-﻿# Spec 06: Technical Architecture
+# Spec 06: Technical Architecture
 
 ## Purpose
 
-Define the architecture constraints that keep gameplay clean now and
-multiplayer-ready later.
+Define architecture constraints for deterministic gameplay simulation,
+render-simulation separation, and multiplayer-ready data flow.
+
+Cross-spec dependencies:
+
+- Spec 11 (physics authority).
+- Spec 08/10 (render-only water/wake presentation consuming simulation state).
 
 ## Core Principle
 
-Even in singleplayer, organize systems as if networking will be added later.
+Keep simulation authoritative, serializable, and deterministic under fixed-step
+updates.
 
 ## Key Entities
 
 - Ship.
 - Projectile.
-- Loot.
+- Loot/Floating object.
 - Island.
-- Encounter.
+- Encounter/Event state.
 - PlayerState.
 
 ## Key Systems
 
-- Movement system.
-- Combat system.
-- Projectile system.
-- Loot system.
-- Spawn system.
-- Event system.
-- Upgrade system.
-- UI system.
+- Input and interaction system.
+- Physics integration system (gravity, buoyancy, drag, torque).
+- Collision and impulse system.
+- Combat fire + projectile system.
+- Damage/sinking/respawn system.
+- Loot lifecycle and pickup system.
+- Event, spawn, and AI systems.
+- UI projection and render bridge systems.
 
 ## Architecture Rules
 
 - Keep simulation state separate from rendering state.
-- Do not place gameplay logic inside camera code.
-- Avoid DOM-driven authoritative game state.
-- Prefer component and system style organization with ECS-style entity tables.
-- Reserve a dedicated ECS player entity ID (`0`) that cannot be used by enemy entities.
-- During ECS sync, detect player/enemy entity ID collisions, skip colliding enemy writes, and log an explicit error.
-- Run gameplay simulation on a fixed timestep and render on variable framerate.
-- Render path must interpolate between previous and current simulation snapshots,
-  rather than snapping directly to latest fixed-step state.
-- Heading interpolation must use shortest-angle blending across `-pi`/`pi`
-  boundaries to avoid rotation flips.
-- Keep scene-atmosphere ownership in the environment render subsystem:
-  lighting, sky, fog, and related visual tuning must remain render-only.
-- Keep renderer exposure and atmosphere state synchronized at render time so
-  visual mood responds without affecting gameplay authority.
-- Expose render debug controls only as non-authoritative tuning interfaces
-  (for example `__BLACKWAKE_DEBUG__`), never as simulation truth.
+- Do not put gameplay authority in camera, HUD, or DOM code.
+- Run gameplay on fixed timestep; render may interpolate.
+- Preserve ECS-style entity tables with stable IDs.
+- Reserve entity `0` for player and reject enemy collisions with that ID.
+- Keep atmosphere/water/wake as render-owned visual systems only.
+- Simulation owns physical values used by render (position, heading, pitch/roll,
+  velocities, damage/sink state).
+- Water-height sampling contract must stay compatible between simulation and
+  rendering paths.
 
-## Render Interpolation Contract
+## Fixed-Step and Interpolation Contract
 
-- Before each fixed simulation tick, capture a render snapshot for:
-  player, enemies, projectiles, and loot.
-- Render receives interpolation alpha in `[0, 1]` as
-  `alpha = accumulator / fixedStep`.
-- Interpolated render-time is derived as
-  `renderTime = worldTime - fixedStep * (1 - alpha)` for smooth visual
-  animation of non-authoritative effects (waves, bobbing, beacons, storm VFX).
-- Entities missing previous snapshots (spawn/despawn edges) must fall back to
-  current simulation state safely.
+- Capture previous render snapshot before each fixed simulation tick.
+- Compute interpolation alpha as `accumulator / fixedStep`.
+- Interpolate ship/enemy/projectile/loot transforms for render only.
+- Handle spawn/despawn edges by safely falling back to current simulation state.
 
 ## ECS System Order
 
 Simulation tick order:
-1. Input capture.
-2. Event timers.
-3. Enemy AI intent.
-4. Movement.
-5. Storm effects.
-6. Combat fire.
-7. Projectile motion and hits.
-8. Sinking and respawn.
-9. Loot lifecycle and pickup.
+
+1. Input capture and interaction intent.
+2. Event timers and world-event lifecycle.
+3. AI intent generation.
+4. Ship force/torque integration and buoyancy update.
+5. Bounds correction and collision/impulse resolution.
+6. Combat fire and recoil application.
+7. Projectile ballistic integration and hit resolution.
+8. Sinking/respawn progression.
+9. Floating loot physics and pickup.
 10. Port/menu/upgrade interactions.
-11. Cleanup and projection to render/UI world view.
+11. Cleanup and world-view projection for render/UI.
 
-## Reference Folder Layout
+## Collision and Layering Contract
 
-```text
-/src
-  /game
-  /entities
-  /systems
-  /ui
-  /world
-  /assets
-  /network
-```
+- Use simplified colliders, not render meshes, for gameplay collisions.
+- Required layers:
+  - world static
+  - ships
+  - projectiles
+  - pickups/debris
+  - VFX non-colliding
 
 ## Multiplayer Future-Proofing
 
-Preferred model for later:
-- Each player controls one ship.
-
-Avoid for now:
-- Multiple players sharing one ship with role-based controls.
-
 Systems that must stay clean and serializable:
-- Ship movement state.
-- Projectile spawn and hit handling.
-- Loot ownership and pickup.
-- Enemy target selection.
-- Event spawning.
-- Dock and port interaction rules.
 
-Networking direction for later:
-- Server authoritative simulation.
-- Client prediction only where needed.
-- Replicable input and world state.
+- Ship physical state (including velocity/rotation state).
+- Projectile spawn + hit handling.
+- Loot ownership and pickup.
+- Enemy target selection and events.
+- Port interaction and upgrade outcomes.
+
+Future networking direction:
+
+- Server-authoritative simulation.
+- Client interpolation/prediction as needed.
+- Replicable input and world-state deltas.

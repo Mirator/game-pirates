@@ -1,68 +1,63 @@
-﻿# Spec 07: Roadmap and Scope Guardrails
+# Spec 07: Roadmap and Scope Guardrails
 
 ## Purpose
 
-Protect delivery momentum by defining phased goals and explicit non-goals.
+Protect delivery momentum by keeping physics and gameplay upgrades phased and
+test-gated.
 
-## Scope Traps To Avoid In MVP
+Cross-spec dependency:
 
-- Realistic sailing simulation.
-- On-foot combat and boarding.
-- Large dialogue systems.
-- Survival needs like hunger or thirst.
-- Crafting trees.
-- Heavy procedural world generation.
-- Open-world RPG quest complexity.
-- Early shared multiplayer world.
+- Spec 11 defines the phased gravity/buoyancy physics rollout.
 
-## Production Phases
+## Scope Traps To Avoid
 
-### Phase 1: Prototype
+- full realistic sailing simulation.
+- full fluid simulation.
+- rope/rigging realism.
+- per-plank destruction.
+- early multiplayer shared world complexity.
 
-Goal: prove game feel.
+## Delivery Phases
 
-Deliverables:
-- Water and sky.
-- Player ship movement.
-- Follow camera.
-- One enemy ship.
-- Cannon firing.
-- Basic HP and sinking.
+### Phase 1: Physics Foundation
 
-### Phase 2: First Playable
-
-Goal: prove core loop.
+Goal: establish coherent core physical behavior.
 
 Deliverables:
-- Loot drops.
-- Simple port interaction.
-- One upgrade menu.
-- Enemy spawning.
-- Basic HUD.
-- Core sound effects.
 
-### Phase 3: Vertical Slice
+- fixed-step gravity-based simulation.
+- ship rigid-body handling with buoyancy probes.
+- ballistic cannon projectiles with water/world collisions.
+- floating loot gravity-to-water lifecycle.
+- baseline collision layers and simplified colliders.
 
-Goal: prove retention.
+### Phase 2: Combat Weight and Feedback
+
+Goal: strengthen physical feedback and readability.
 
 Deliverables:
-- 3 to 5 islands.
-- Multiple enemy types.
-- Treasure objectives.
-- Event system.
-- Improved VFX.
-- Lighting, sky, and atmosphere polish (Spec 08 rendering track).
-- Music and balance pass.
 
-## Build-First MVP Checklist
+- cannon recoil impulses.
+- tuned collision and hit impulses.
+- improved sinking progression.
+- improved water-entry damping and splash timing.
 
-- One ship.
-- One enemy.
-- One island.
-- One port.
-- Cannon combat.
-- Loot pickup.
-- One upgrade screen.
+### Phase 3: Depth and Cleanup
 
-Decision rule:
-- If this set is not fun, adding more features will not fix the core problem.
+Goal: finalize differentiated ship feel and long-tail physics quality.
+
+Deliverables:
+
+- damage-based buoyancy degradation.
+- differentiated ship class mass/inertia behavior.
+- improved debris/wreck handling.
+- expanded wave-sampling influence where enabled.
+- contract cleanup for finalized rigid-body-first pathways.
+
+## Build-First Checklist
+
+- player ship remains controllable.
+- cannon arcs remain readable.
+- collisions feel consequential without pinball behavior.
+- floating pickups remain collectible and stable.
+- simulation remains stable under normal gameplay load.

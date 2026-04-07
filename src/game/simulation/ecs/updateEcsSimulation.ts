@@ -1,41 +1,47 @@
 import {
+  CANNON_COLLISION_RADIUS,
   CANNON_DAMAGE,
+  CANNON_DRAG_AIR,
+  CANNON_DRAG_WATER,
   CANNON_FIRING_CONE_DOT,
+  CANNON_GRAVITY_SCALE,
+  CANNON_IMPACT_IMPULSE,
+  CANNON_INHERIT_SHIP_VELOCITY,
   CANNON_LIFETIME,
+  CANNON_MASS,
+  CANNON_MUZZLE_VELOCITY,
+  CANNON_RECOIL_IMPULSE,
+  CANNON_RECOIL_ROLL,
+  CANNON_RECOIL_YAW,
   CANNON_RELOAD_TIME,
-  CANNON_SPEED,
+  CANNON_TERMINATE_ON_WATER_IMPACT,
+  CANNON_VERTICAL_MUZZLE_VELOCITY,
   CARGO_SALE_VALUE,
-  ENEMY_ACCELERATION,
   ENEMY_BROADSIDE_RANGE,
   ENEMY_DETECTION_RANGE,
-  ENEMY_DRAG,
   ENEMY_HARD_CAP,
-  ENEMY_DRIFT_DAMPING,
-  ENEMY_DRIFT_GAIN,
-  ENEMY_MAX_FORWARD_SPEED,
-  ENEMY_MAX_REVERSE_SPEED,
+  ENEMY_MASS_BASE,
   ENEMY_SPAWN_POINTS,
-  ENEMY_TURN_RATE,
   EVENT_CONVOY_DURATION,
   EVENT_NAVY_DURATION,
   EVENT_STORM_DURATION,
   EVENT_TREASURE_DURATION,
+  LOOT_ANGULAR_DAMPING,
+  LOOT_BUOYANCY_MULTIPLIER_HEAVY,
+  LOOT_BUOYANCY_MULTIPLIER_LIGHT,
+  LOOT_FLOAT_MASS_HEAVY,
+  LOOT_FLOAT_MASS_LIGHT,
   LOOT_LIFETIME,
   LOOT_PICKUP_RADIUS,
-  PLAYER_ACCELERATION,
-  PLAYER_BRAKE_ACCELERATION,
+  LOOT_WATER_DRAG,
   PLAYER_BURST_COOLDOWN,
   PLAYER_BURST_DURATION,
-  PLAYER_BURST_SPEED_MULTIPLIER,
-  PLAYER_DRAG,
-  PLAYER_DRIFT_DAMPING,
-  PLAYER_DRIFT_GAIN,
-  PLAYER_MAX_FORWARD_SPEED,
-  PLAYER_MAX_REVERSE_SPEED,
+  PLAYER_BURST_THRUST_MULTIPLIER,
+  PLAYER_COLLISION_DAMAGE_MULTIPLIER,
+  PLAYER_COLLISION_DAMAGE_THRESHOLD,
   PLAYER_REPAIR_AMOUNT,
   PLAYER_REPAIR_COOLDOWN,
   PLAYER_RESPAWN,
-  PLAYER_TURN_RATE,
   SINK_DURATION,
   STORM_INTENSITY_MAX,
   STORM_RADIUS,
@@ -54,118 +60,90 @@ import type {
   InputState,
   LootKind,
   LootState,
+  ProjectileState,
+  ShipDamageState,
   ShipState,
   SimulationEvent,
   WorldEventKind
 } from "../types";
 import {
-  calculateForwardVector as calculateForward,
-  calculateLeftVector as calculateLeft,
+  calculateForwardVector as forwardOf,
+  calculateLeftVector as leftOf,
   classifySideFromLeftDot,
   getBroadsideVector,
   sideDotAgainstShipLeft
 } from "../sideMath";
+import { DEFAULT_WATER_SURFACE_TUNING, DEFAULT_WATER_SURFACE_WAVES } from "../../physics/waterProfile";
+import { sampleWaterHeight } from "../../physics/waterSurface";
 import { ensureEcsState, syncEcsFromWorldView, syncWorldViewFromEcs } from "./createEcsState";
 import { clamp, distanceSquared, normalizeAngle, steeringTowardHeading } from "./math";
 import type { EcsEnemyIntent, EcsState, WorldWithEcs } from "./types";
 
-interface MovementTuning {
-  acceleration: number;
-  brakeAcceleration?: number;
-  maxForwardSpeed: number;
-  maxReverseSpeed: number;
-  drag: number;
-  turnRate: number;
-  driftGain: number;
-  driftDamping: number;
-}
-
-interface EnemyProfile {
+type EP = {
   maxHp: number;
   detectionRange: number;
   broadsideRange: number;
   reloadDuration: number;
-  movement: MovementTuning;
   fleeThreshold: number;
   lootGoldBase: number;
   lootMaterialBase: number;
   lootCargoBase: number;
   mapDropEvery: number;
-}
-
-const EVENT_CYCLE: WorldEventKind[] = ["treasure_marker", "enemy_convoy", "storm", "navy_patrol"];
-
-const PLAYER_TUNING: MovementTuning = {
-  acceleration: PLAYER_ACCELERATION,
-  brakeAcceleration: PLAYER_BRAKE_ACCELERATION,
-  maxForwardSpeed: PLAYER_MAX_FORWARD_SPEED,
-  maxReverseSpeed: PLAYER_MAX_REVERSE_SPEED,
-  drag: PLAYER_DRAG,
-  turnRate: PLAYER_TURN_RATE,
-  driftGain: PLAYER_DRIFT_GAIN,
-  driftDamping: PLAYER_DRIFT_DAMPING
+  massScale: number;
+  thrustScale: number;
+  turnScale: number;
+  buoyancyScale: number;
 };
 
-const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
+const EVENT_CYCLE: WorldEventKind[] = ["treasure_marker", "enemy_convoy", "storm", "navy_patrol"];
+const PROJ_HEIGHT_HIT = 2.6;
+const SINK_BUOY_LOSS_RATE = 0.55;
+
+const EPF: Record<EnemyArchetype, EP> = {
   merchant: {
     maxHp: 68,
     detectionRange: 54,
     broadsideRange: 13,
     reloadDuration: 2.45,
-    movement: {
-      acceleration: ENEMY_ACCELERATION * 0.8,
-      maxForwardSpeed: ENEMY_MAX_FORWARD_SPEED * 0.94,
-      maxReverseSpeed: ENEMY_MAX_REVERSE_SPEED * 0.7,
-      drag: ENEMY_DRAG * 1.05,
-      turnRate: ENEMY_TURN_RATE * 0.88,
-      driftGain: ENEMY_DRIFT_GAIN * 0.82,
-      driftDamping: ENEMY_DRIFT_DAMPING
-    },
     fleeThreshold: 0.75,
     lootGoldBase: 58,
     lootMaterialBase: 1,
     lootCargoBase: 3,
-    mapDropEvery: 6
+    mapDropEvery: 6,
+    massScale: 0.95,
+    thrustScale: 0.78,
+    turnScale: 0.86,
+    buoyancyScale: 0.92
   },
   raider: {
     maxHp: 100,
     detectionRange: ENEMY_DETECTION_RANGE,
     broadsideRange: ENEMY_BROADSIDE_RANGE,
     reloadDuration: 1.7,
-    movement: {
-      acceleration: ENEMY_ACCELERATION,
-      maxForwardSpeed: ENEMY_MAX_FORWARD_SPEED,
-      maxReverseSpeed: ENEMY_MAX_REVERSE_SPEED,
-      drag: ENEMY_DRAG,
-      turnRate: ENEMY_TURN_RATE,
-      driftGain: ENEMY_DRIFT_GAIN,
-      driftDamping: ENEMY_DRIFT_DAMPING
-    },
     fleeThreshold: 0.25,
     lootGoldBase: 36,
     lootMaterialBase: 2,
     lootCargoBase: 2,
-    mapDropEvery: 8
+    mapDropEvery: 8,
+    massScale: 1,
+    thrustScale: 1,
+    turnScale: 1,
+    buoyancyScale: 1
   },
   navy: {
     maxHp: 150,
     detectionRange: 80,
     broadsideRange: 24,
     reloadDuration: 1.35,
-    movement: {
-      acceleration: ENEMY_ACCELERATION * 0.92,
-      maxForwardSpeed: ENEMY_MAX_FORWARD_SPEED * 0.88,
-      maxReverseSpeed: ENEMY_MAX_REVERSE_SPEED * 0.92,
-      drag: ENEMY_DRAG * 1.04,
-      turnRate: ENEMY_TURN_RATE * 0.82,
-      driftGain: ENEMY_DRIFT_GAIN * 0.72,
-      driftDamping: ENEMY_DRIFT_DAMPING * 1.08
-    },
     fleeThreshold: 0,
     lootGoldBase: 82,
     lootMaterialBase: 3,
     lootCargoBase: 4,
-    mapDropEvery: 4
+    mapDropEvery: 4,
+    massScale: 1.25,
+    thrustScale: 0.85,
+    turnScale: 0.8,
+    buoyancyScale: 1.2
   }
 };
 
@@ -173,209 +151,233 @@ function emitEvent(worldState: WorldWithEcs, event: SimulationEvent): void {
   worldState.events.push(event);
 }
 
-function togglePortMenu(worldState: WorldWithEcs, open: boolean): void {
-  if (worldState.port.menuOpen === open) {
+function seaHeight(worldState: WorldWithEcs, x: number, z: number): number {
+  return worldState.physics.seaLevel + sampleWaterHeight(DEFAULT_WATER_SURFACE_WAVES, { x, z }, worldState.time, DEFAULT_WATER_SURFACE_TUNING);
+}
+
+function setDamageState(ship: ShipState): void {
+  if (ship.status === "sinking") {
+    ship.damageState = "sunk";
     return;
   }
+  const hpRatio = ship.maxHp > 0 ? ship.hp / ship.maxHp : 0;
+  ship.damageState = hpRatio <= 0.3 ? "critical" : hpRatio <= 0.7 ? "damaged" : "healthy";
+}
 
+function decReload(ship: ShipState, dt: number): void {
+  ship.reload.left = Math.max(0, ship.reload.left - dt);
+  ship.reload.right = Math.max(0, ship.reload.right - dt);
+  ship.repairCooldown = Math.max(0, ship.repairCooldown - dt);
+}
+
+function updatePortRange(worldState: WorldWithEcs): void {
+  const p = worldState.player;
+  const port = worldState.port;
+  const dockSq = port.radius * port.radius;
+  const promptSq = port.promptRadius * port.promptRadius;
+  port.playerInRange = distanceSquared(p.position.x, p.position.z, port.position.x, port.position.z) <= dockSq;
+  port.playerNearPort = distanceSquared(p.position.x, p.position.z, port.position.x, port.position.z) <= promptSq;
+  if (!port.playerInRange && port.menuOpen) togglePortMenu(worldState, false);
+}
+
+function togglePortMenu(worldState: WorldWithEcs, open: boolean): void {
+  if (worldState.port.menuOpen === open) return;
   worldState.port.menuOpen = open;
   if (open && worldState.burst.active) {
     worldState.burst.active = false;
     worldState.burst.remaining = 0;
     worldState.burst.cooldown = Math.max(worldState.burst.cooldown, PLAYER_BURST_COOLDOWN);
   }
-
   emitEvent(worldState, { type: open ? "dock_open" : "dock_close" });
 }
 
-function updatePortRange(worldState: WorldWithEcs): void {
-  const player = worldState.player;
-  const port = worldState.port;
-  const dockRangeSq = port.radius * port.radius;
-  const promptRangeSq = port.promptRadius * port.promptRadius;
-
-  port.playerInRange = distanceSquared(player.position.x, player.position.z, port.position.x, port.position.z) <= dockRangeSq;
-  port.playerNearPort =
-    distanceSquared(player.position.x, player.position.z, port.position.x, port.position.z) <= promptRangeSq;
-
-  if (!port.playerInRange && port.menuOpen) {
-    togglePortMenu(worldState, false);
-  }
+function insideStorm(worldState: WorldWithEcs, ship: ShipState): boolean {
+  return (
+    worldState.storm.active &&
+    distanceSquared(ship.position.x, ship.position.z, worldState.storm.center.x, worldState.storm.center.z) <= worldState.storm.radius ** 2
+  );
 }
 
-function decreaseReloadTimers(ship: ShipState, dt: number): void {
-  ship.reload.left = Math.max(0, ship.reload.left - dt);
-  ship.reload.right = Math.max(0, ship.reload.right - dt);
-  ship.repairCooldown = Math.max(0, ship.repairCooldown - dt);
+function updateShipPhysics(worldState: WorldWithEcs, ship: ShipState, throttle: number, turn: number, dt: number, thrustScale = 1): void {
+  if (ship.status !== "alive") return;
+  const f = forwardOf(ship.heading);
+  const l = leftOf(ship.heading);
+  const storm = insideStorm(worldState, ship);
+  const thrust = ship.thrustForce * clamp(throttle, -1, 1) * thrustScale * (storm ? STORM_SPEED_MULTIPLIER : 1);
+  const vx = ship.linearVelocity.x;
+  const vz = ship.linearVelocity.z;
+  const vy = ship.linearVelocity.y;
+  const fwdSpeed = vx * f.x + vz * f.z;
+  const latSpeed = vx * l.x + vz * l.z;
+  const planarSpeed = Math.hypot(vx, vz);
+  let fx = f.x * thrust - f.x * fwdSpeed * Math.abs(fwdSpeed) * ship.drag.linearWater - l.x * latSpeed * Math.abs(latSpeed) * ship.drag.lateralWater;
+  let fz = f.z * thrust - f.z * fwdSpeed * Math.abs(fwdSpeed) * ship.drag.linearWater - l.z * latSpeed * Math.abs(latSpeed) * ship.drag.lateralWater;
+  let fy = worldState.physics.gravity * ship.mass - vy * ship.buoyancyDamping;
+  const turnInput = clamp(turn, -1, 1);
+  let yawT = turnInput * ship.turnTorque * clamp(ship.lowSpeedTurnAssist + (planarSpeed / 12) * (1 - ship.lowSpeedTurnAssist), 0.2, 1);
+  if (planarSpeed < 3) {
+    yawT += turnInput * ship.turnTorque * 1.0;
+  }
+  if (turnInput !== 0 && Math.sign(turnInput) !== Math.sign(ship.angularVelocity) && Math.abs(ship.angularVelocity) > 0.001) {
+    yawT += -ship.angularVelocity * ship.mass * 2.5;
+  }
+  let pitchT = -ship.pitchVelocity * ship.drag.pitchDamping * ship.mass;
+  let rollT = -ship.rollVelocity * ship.drag.rollDamping * ship.mass;
+
+  let submerged = 0;
+  for (const probe of ship.buoyancyProbes) {
+    const wx = ship.position.x + l.x * probe.localOffset.x + f.x * probe.localOffset.z;
+    const wz = ship.position.z + l.z * probe.localOffset.x + f.z * probe.localOffset.z;
+    const wh = seaHeight(worldState, wx, wz);
+    const ph = ship.position.y + probe.localOffset.y + ship.pitch * probe.localOffset.z * 0.58 - ship.roll * probe.localOffset.x * 0.58;
+    const sub = wh - ph;
+    if (sub <= 0) continue;
+    submerged += 1;
+    const b = sub * ship.buoyancyStrength * probe.weight * worldState.physics.waterDensityMultiplier * (1 - ship.buoyancyLoss);
+    fy += b;
+    pitchT += b * probe.localOffset.z * 0.03;
+    rollT += -b * probe.localOffset.x * 0.03;
+  }
+  if (submerged === 0 && ship.position.y > seaHeight(worldState, ship.position.x, ship.position.z) + 0.2) ship.waterState = "airborne";
+  else if (submerged < Math.max(1, Math.floor(ship.buoyancyProbes.length * 0.5))) ship.waterState = "water_entry";
+  else ship.waterState = "submerged";
+  if (storm) {
+    fx *= 0.9;
+    fz *= 0.9;
+  }
+
+  const invM = 1 / Math.max(1, ship.mass);
+  ship.linearVelocity.x += fx * invM * dt;
+  ship.linearVelocity.y += fy * invM * dt;
+  ship.linearVelocity.z += fz * invM * dt;
+  if (storm) {
+    const stormDamping = Math.exp(-1.4 * dt);
+    ship.linearVelocity.x *= stormDamping;
+    ship.linearVelocity.z *= stormDamping;
+  }
+  ship.angularVelocity += (yawT * invM - ship.angularVelocity * ship.drag.angularWater) * dt;
+  ship.pitchVelocity += pitchT * invM * dt;
+  ship.rollVelocity += rollT * invM * dt;
+  ship.heading = normalizeAngle(ship.heading + ship.angularVelocity * dt);
+  ship.pitch = clamp(ship.pitch + ship.pitchVelocity * dt, -0.36, 0.36);
+  ship.roll = clamp(ship.roll + ship.rollVelocity * dt, -0.42, 0.42);
+  ship.pitch += (-ship.pitch) * clamp(dt * 0.8, 0, 1);
+  ship.roll += (-ship.roll) * clamp(dt * 0.85, 0, 1);
+  ship.position.x += ship.linearVelocity.x * dt;
+  ship.position.y = clamp(ship.position.y + ship.linearVelocity.y * dt, -8, 6);
+  ship.position.z += ship.linearVelocity.z * dt;
+  const af = forwardOf(ship.heading);
+  const al = leftOf(ship.heading);
+  ship.speed = ship.linearVelocity.x * af.x + ship.linearVelocity.z * af.z;
+  ship.drift = ship.linearVelocity.x * al.x + ship.linearVelocity.z * al.z;
+  ship.throttle = clamp(throttle, -1, 1);
+  ship.turnInput = turnInput;
+  ship.buoyancyLoss = clamp((1 - ship.hp / Math.max(1, ship.maxHp)) * 0.5, 0, 0.5);
 }
 
-function moveShip(ship: ShipState, throttleInput: number, turnInput: number, dt: number, tuning: MovementTuning): void {
-  if (ship.status !== "alive") {
-    return;
+function keepInBounds(worldState: WorldWithEcs, ship: ShipState, soft: boolean): void {
+  const d2 = ship.position.x * ship.position.x + ship.position.z * ship.position.z;
+  if (d2 <= worldState.boundsRadius ** 2) return;
+  const d = Math.sqrt(d2);
+  const nx = ship.position.x / Math.max(1e-5, d);
+  const nz = ship.position.z / Math.max(1e-5, d);
+  ship.position.x = nx * worldState.boundsRadius;
+  ship.position.z = nz * worldState.boundsRadius;
+  const outV = ship.linearVelocity.x * nx + ship.linearVelocity.z * nz;
+  if (outV > 0) {
+    const s = soft ? 1.2 : 1.5;
+    ship.linearVelocity.x -= nx * outV * s;
+    ship.linearVelocity.z -= nz * outV * s;
   }
-
-  const changingDirection = ship.speed !== 0 && Math.sign(throttleInput) !== Math.sign(ship.speed);
-  const acceleration = changingDirection ? (tuning.brakeAcceleration ?? tuning.acceleration) : tuning.acceleration;
-
-  ship.speed += throttleInput * acceleration * dt;
-  ship.speed *= Math.exp(-tuning.drag * dt);
-  ship.speed = clamp(ship.speed, tuning.maxReverseSpeed, tuning.maxForwardSpeed);
-
-  const speedFactor = clamp(Math.abs(ship.speed) / tuning.maxForwardSpeed, 0.2, 1);
-  const reverseDirection = ship.speed < -0.15 ? -1 : 1;
-  ship.heading = normalizeAngle(ship.heading + turnInput * tuning.turnRate * speedFactor * dt * reverseDirection);
-
-  ship.drift += turnInput * ship.speed * tuning.driftGain * dt;
-  ship.drift *= Math.exp(-tuning.driftDamping * dt);
-
-  const forward = calculateForward(ship.heading);
-  const left = calculateLeft(ship.heading);
-  ship.position.x += forward.x * ship.speed * dt + left.x * ship.drift * dt;
-  ship.position.z += forward.z * ship.speed * dt + left.z * ship.drift * dt;
-  ship.throttle = throttleInput;
-}
-
-function applyStormPenalty(worldState: WorldWithEcs, ship: ShipState, dt: number): void {
-  if (!worldState.storm.active || ship.status !== "alive") {
-    return;
-  }
-  const storm = worldState.storm;
-  if (distanceSquared(ship.position.x, ship.position.z, storm.center.x, storm.center.z) > storm.radius * storm.radius) {
-    return;
-  }
-
-  const damping = clamp(1 - (1 - STORM_SPEED_MULTIPLIER) * 2.2 * dt, 0.45, 1);
-  ship.speed *= damping;
-  ship.drift *= clamp(1 - storm.intensity * 1.1 * dt, 0.6, 1);
-}
-
-function keepShipInBoundsHard(ship: ShipState, boundsRadius: number): void {
-  const distSq = ship.position.x * ship.position.x + ship.position.z * ship.position.z;
-  if (distSq <= boundsRadius * boundsRadius) {
-    return;
-  }
-  const distance = Math.sqrt(distSq);
-  const scale = boundsRadius / distance;
-  ship.position.x *= scale;
-  ship.position.z *= scale;
-  ship.speed *= 0.45;
-  ship.drift *= 0.3;
-  ship.heading = normalizeAngle(Math.atan2(-ship.position.x, -ship.position.z));
-}
-
-function keepPlayerInBoundsSoft(ship: ShipState, boundsRadius: number): void {
-  const distSq = ship.position.x * ship.position.x + ship.position.z * ship.position.z;
-  if (distSq <= boundsRadius * boundsRadius) {
-    return;
-  }
-
-  const distance = Math.sqrt(distSq);
-  if (distance < 0.0001) {
-    return;
-  }
-
-  const normalX = ship.position.x / distance;
-  const normalZ = ship.position.z / distance;
-  const clampedDistance = Math.max(0, boundsRadius - 0.001);
-  ship.position.x = normalX * clampedDistance;
-  ship.position.z = normalZ * clampedDistance;
-
-  const forward = calculateForward(ship.heading);
-  const left = calculateLeft(ship.heading);
-  const velocityX = forward.x * ship.speed + left.x * ship.drift;
-  const velocityZ = forward.z * ship.speed + left.z * ship.drift;
-  const outwardVelocity = velocityX * normalX + velocityZ * normalZ;
-  if (outwardVelocity <= 0) {
-    ship.speed *= 0.92;
-    ship.drift *= 0.8;
-    return;
-  }
-
-  const forwardDotNormal = forward.x * normalX + forward.z * normalZ;
-  const reflectedForwardX = forward.x - 2 * forwardDotNormal * normalX;
-  const reflectedForwardZ = forward.z - 2 * forwardDotNormal * normalZ;
-  const reflectedLength = Math.hypot(reflectedForwardX, reflectedForwardZ);
-  if (reflectedLength > 0.0001) {
-    ship.heading = normalizeAngle(Math.atan2(reflectedForwardX / reflectedLength, reflectedForwardZ / reflectedLength));
-  }
-
-  ship.speed *= 0.55;
-  ship.drift *= 0.45;
+  if (!soft) ship.heading = normalizeAngle(Math.atan2(-ship.position.x, -ship.position.z));
 }
 
 function chooseSpawnArchetype(worldState: WorldWithEcs): EnemyArchetype {
   const threat = worldState.flags.enemiesSunk + Math.floor(worldState.time / 45);
-  const selector = (worldState.nextEnemyId + threat) % 10;
-
-  if (worldState.time < 90) {
-    return selector <= 2 ? "merchant" : "raider";
-  }
-  if (worldState.time < 180) {
-    if (selector <= 1) return "merchant";
-    if (selector >= 8) return "navy";
-    return "raider";
-  }
-  if (selector <= 1) return "merchant";
-  if (selector >= 6) return "navy";
-  return "raider";
+  const s = (worldState.nextEnemyId + threat) % 10;
+  if (worldState.time < 90) return s <= 2 ? "merchant" : "raider";
+  if (worldState.time < 180) return s <= 1 ? "merchant" : s >= 8 ? "navy" : "raider";
+  return s <= 1 ? "merchant" : s >= 6 ? "navy" : "raider";
 }
 
 function chooseSpawnPoint(worldState: WorldWithEcs): { x: number; z: number; heading: number } {
-  let bestPoint = ENEMY_SPAWN_POINTS[0]!;
-  let bestScore = -Infinity;
-
+  let best = ENEMY_SPAWN_POINTS[0]!;
+  let score = -Infinity;
   for (let i = 0; i < ENEMY_SPAWN_POINTS.length; i += 1) {
-    const candidate = ENEMY_SPAWN_POINTS[i];
-    if (!candidate) continue;
-
-    const distToPlayer = Math.sqrt(
-      distanceSquared(candidate.x, candidate.z, worldState.player.position.x, worldState.player.position.z)
-    );
-    const distToPort = Math.sqrt(distanceSquared(candidate.x, candidate.z, worldState.port.position.x, worldState.port.position.z));
-    if (distToPort < worldState.port.safeRadius) continue;
-
-    const churnBias = ((worldState.nextEnemyId + i) % ENEMY_SPAWN_POINTS.length) * 0.01;
-    const score = distToPlayer + churnBias;
-    if (score > bestScore) {
-      bestScore = score;
-      bestPoint = candidate;
+    const c = ENEMY_SPAWN_POINTS[i];
+    if (!c) continue;
+    const dp = Math.sqrt(distanceSquared(c.x, c.z, worldState.player.position.x, worldState.player.position.z));
+    const dport = Math.sqrt(distanceSquared(c.x, c.z, worldState.port.position.x, worldState.port.position.z));
+    if (dport < worldState.port.safeRadius) continue;
+    const s = dp + ((worldState.nextEnemyId + i) % ENEMY_SPAWN_POINTS.length) * 0.01;
+    if (s > score) {
+      score = s;
+      best = c;
     }
   }
-  return bestPoint;
+  return best;
 }
 
-function spawnEnemy(worldState: WorldWithEcs, ecs: EcsState, archetype: EnemyArchetype, spawn = chooseSpawnPoint(worldState)): void {
-  if (ecs.enemyTable.size >= ENEMY_HARD_CAP) {
-    return;
-  }
-  const profile = ENEMY_PROFILES[archetype];
-  const id = worldState.nextEnemyId++;
-  const enemy: EnemyState = {
+function createEnemy(id: number, archetype: EnemyArchetype, s: { x: number; z: number; heading: number }): EnemyState {
+  const p = EPF[archetype];
+  return {
     id,
     archetype,
     owner: "enemy",
-    position: { x: spawn.x, z: spawn.z },
-    heading: spawn.heading,
+    position: { x: s.x, y: 0.18, z: s.z },
+    heading: s.heading,
+    pitch: 0,
+    roll: 0,
+    linearVelocity: { x: 0, y: 0, z: 0 },
+    angularVelocity: 0,
+    pitchVelocity: 0,
+    rollVelocity: 0,
     speed: 0,
     drift: 0,
     throttle: 0,
-    hp: profile.maxHp,
-    maxHp: profile.maxHp,
+    turnInput: 0,
+    hp: p.maxHp,
+    maxHp: p.maxHp,
     radius: archetype === "navy" ? 2.5 : 2.1,
+    mass: ENEMY_MASS_BASE * p.massScale,
+    centerOfMass: { x: 0, y: -0.24, z: 0 },
+    buoyancyProbes: [
+      { id: "bow-left", localOffset: { x: -1.1, y: 0, z: 2.6 }, weight: 1 },
+      { id: "bow-right", localOffset: { x: 1.1, y: 0, z: 2.6 }, weight: 1 },
+      { id: "stern-left", localOffset: { x: -1.1, y: 0, z: -2.6 }, weight: 1 },
+      { id: "stern-right", localOffset: { x: 1.1, y: 0, z: -2.6 }, weight: 1 },
+      { id: "center", localOffset: { x: 0, y: -0.12, z: 0 }, weight: 1.2 }
+    ],
+    buoyancyStrength: 620 * p.buoyancyScale,
+    buoyancyDamping: 8.5,
+    buoyancyLoss: 0,
+    hull: { kind: "compound_hull", length: archetype === "navy" ? 6.2 : 5.6, width: archetype === "navy" ? 2.8 : 2.4, draft: 1 },
+    drag: { linearAir: 0.26, linearWater: 1.15, lateralWater: 2.55, angularAir: 1.02, angularWater: 2.4, rollDamping: 3.35, pitchDamping: 3.4 },
+    thrustForce: 780 * p.thrustScale,
+    turnTorque: 80 * p.turnScale,
+    lowSpeedTurnAssist: 0.52,
     reload: { left: 0, right: 0 },
     status: "alive",
+    damageState: "healthy",
     sinkTimer: 0,
+    repairCooldown: 0,
+    collisionLayer: "ships",
+    waterState: "submerged",
     aiState: "patrol",
     patrolAngle: (id % 8) * 0.3,
     lootDropped: false,
-    repairCooldown: 0,
     aiStateTimer: 0,
     detectProgress: 0,
     pendingFireSide: null
   };
+}
 
-  ecs.enemyTable.set(id, enemy);
-  ecs.shipTable.set(id, enemy);
+function spawnEnemy(worldState: WorldWithEcs, ecs: EcsState, archetype: EnemyArchetype, spawn = chooseSpawnPoint(worldState)): void {
+  if (ecs.enemyTable.size >= ENEMY_HARD_CAP) return;
+  const id = worldState.nextEnemyId++;
+  const e = createEnemy(id, archetype, spawn);
+  ecs.enemyTable.set(id, e);
+  ecs.shipTable.set(id, e);
 }
 
 function spawnEnemyIfNeeded(worldState: WorldWithEcs, ecs: EcsState): void {
@@ -385,497 +387,532 @@ function spawnEnemyIfNeeded(worldState: WorldWithEcs, ecs: EcsState): void {
   }
 }
 
-function addProjectile(worldState: WorldWithEcs, ecs: EcsState, ship: ShipState, side: CannonSide): void {
-  const forward = calculateForward(ship.heading);
-  const sideVector = getBroadsideVector(ship.heading, side);
-
-  const directionX = sideVector.x * 0.96 + forward.x * 0.14;
-  const directionZ = sideVector.z * 0.96 + forward.z * 0.14;
-  const length = Math.hypot(directionX, directionZ);
-  if (length < 0.0001) {
-    return;
-  }
-
-  const projectile = {
-    id: worldState.nextProjectileId++,
-    owner: ship.owner,
-    position: {
-      x: ship.position.x + sideVector.x * (ship.radius + 1.4) + forward.x * 0.8,
-      z: ship.position.z + sideVector.z * (ship.radius + 1.4) + forward.z * 0.8
-    },
-    velocity: {
-      x: (directionX / length) * CANNON_SPEED,
-      z: (directionZ / length) * CANNON_SPEED
-    },
-    lifetime: CANNON_LIFETIME,
-    active: true
-  };
-
-  ecs.projectileTable.set(projectile.id, projectile);
-}
-
-function getReloadDuration(ship: ShipState, enemy?: EnemyState): number {
-  if (ship.owner === "player") {
-    return CANNON_RELOAD_TIME;
-  }
-  return ENEMY_PROFILES[(enemy ?? (ship as EnemyState)).archetype].reloadDuration;
-}
-
-function tryFire(ship: ShipState, side: CannonSide, worldState: WorldWithEcs, ecs: EcsState, enemy?: EnemyState): boolean {
-  if (ship.status !== "alive") return false;
-  if (ship.reload[side] > 0) return false;
-
-  ship.reload[side] = getReloadDuration(ship, enemy);
-  addProjectile(worldState, ecs, ship, side);
-  emitEvent(worldState, { type: "cannon_fire", owner: ship.owner });
-  return true;
-}
-
-function maybeAddLoot(
-  worldState: WorldWithEcs,
-  ecs: EcsState,
-  enemy: EnemyState,
-  kind: LootKind,
-  amount: number,
-  angleOffset: number,
-  speed: number
-): void {
-  if (amount <= 0) {
-    return;
-  }
-  const angle = enemy.id * 0.71 + angleOffset;
-  const loot: LootState = {
-    id: worldState.nextLootId++,
-    kind,
-    amount,
-    position: {
-      x: enemy.position.x + Math.cos(angle) * 1.8,
-      z: enemy.position.z + Math.sin(angle) * 1.8
-    },
-    driftVelocity: {
-      x: Math.cos(angle) * speed,
-      z: Math.sin(angle) * speed
-    },
-    lifetime: LOOT_LIFETIME,
-    pickupRadius: LOOT_PICKUP_RADIUS,
-    active: true
-  };
-  ecs.lootTable.set(loot.id, loot);
-}
-
-function spawnLoot(worldState: WorldWithEcs, ecs: EcsState, enemy: EnemyState): void {
-  const profile = ENEMY_PROFILES[enemy.archetype];
-  const goldAmount = profile.lootGoldBase + (enemy.id % 4) * 5;
-  const materialAmount = profile.lootMaterialBase + (enemy.id % 2);
-  const cargoAmount = profile.lootCargoBase + (enemy.id % 3);
-  const mapAmount = enemy.id % profile.mapDropEvery === 0 ? 1 : 0;
-
-  maybeAddLoot(worldState, ecs, enemy, "gold", goldAmount, 0.2, 2.3);
-  maybeAddLoot(worldState, ecs, enemy, "repair_material", materialAmount, -0.32, 1.5);
-  maybeAddLoot(worldState, ecs, enemy, "cargo", cargoAmount, 0.92, 1.8);
-  maybeAddLoot(worldState, ecs, enemy, "treasure_map", mapAmount, -0.82, 1.2);
-}
-
-function beginShipSinking(worldState: WorldWithEcs, ship: ShipState): void {
-  if (ship.status !== "alive") return;
-  ship.status = "sinking";
-  ship.sinkTimer = SINK_DURATION;
-  ship.speed = 0;
-  ship.drift = 0;
-  emitEvent(worldState, { type: "ship_sunk", owner: ship.owner });
-}
-
-function beginEnemySinking(worldState: WorldWithEcs, ecs: EcsState, enemy: EnemyState): void {
-  if (enemy.status !== "alive") return;
-  beginShipSinking(worldState, enemy);
-  if (!enemy.lootDropped) {
-    spawnLoot(worldState, ecs, enemy);
-    enemy.lootDropped = true;
-    worldState.flags.enemiesSunk += 1;
-  }
-}
-
-function updatePlayerRespawnSystem(worldState: WorldWithEcs, dt: number): void {
+function enemyIntent(worldState: WorldWithEcs, enemy: EnemyState, dt: number): EcsEnemyIntent {
   const player = worldState.player;
-  if (player.status !== "sinking") return;
-
-  worldState.burst.active = false;
-  worldState.burst.remaining = 0;
-
-  player.sinkTimer = Math.max(0, player.sinkTimer - dt);
-  player.speed *= 0.88;
-  player.drift *= 0.86;
-  if (player.sinkTimer > 0) return;
-
-  player.position.x = PLAYER_RESPAWN.x;
-  player.position.z = PLAYER_RESPAWN.z;
-  player.heading = PLAYER_RESPAWN.heading;
-  player.speed = 0;
-  player.drift = 0;
-  player.throttle = 0;
-  player.hp = player.maxHp;
-  player.reload.left = 0;
-  player.reload.right = 0;
-  player.status = "alive";
-  player.sinkTimer = 0;
-  player.repairCooldown = 0;
-  worldState.flags.playerRespawns += 1;
-}
-
-function updateEnemySinkingSystem(ecs: EcsState, dt: number): void {
-  for (const enemy of ecs.enemyTable.values()) {
-    if (enemy.status !== "sinking") {
-      continue;
-    }
-    enemy.sinkTimer = Math.max(0, enemy.sinkTimer - dt);
-    enemy.speed *= 0.88;
-    enemy.drift *= 0.86;
-    if (enemy.sinkTimer > 0) {
-      continue;
-    }
-    ecs.enemyTable.delete(enemy.id);
-    ecs.shipTable.delete(enemy.id);
-  }
-}
-
-function inflictDamageToPlayer(worldState: WorldWithEcs, damage: number): void {
-  const player = worldState.player;
-  if (player.status !== "alive") return;
-  player.hp = Math.max(0, player.hp - damage);
-  emitEvent(worldState, { type: "ship_hit", target: "player" });
-  if (player.hp <= 0) {
-    beginShipSinking(worldState, player);
-  }
-}
-
-function inflictDamageToEnemy(worldState: WorldWithEcs, ecs: EcsState, enemy: EnemyState, damage: number): void {
-  if (enemy.status !== "alive") return;
-  enemy.hp = Math.max(0, enemy.hp - damage);
-  emitEvent(worldState, { type: "ship_hit", target: "enemy" });
-  if (enemy.hp <= 0) {
-    beginEnemySinking(worldState, ecs, enemy);
-  }
-}
-
-function projectileMotionSystem(worldState: WorldWithEcs, ecs: EcsState, dt: number): void {
-  for (const projectile of ecs.projectileTable.values()) {
-    if (!projectile.active) continue;
-
-    projectile.position.x += projectile.velocity.x * dt;
-    projectile.position.z += projectile.velocity.z * dt;
-    projectile.lifetime -= dt;
-
-    const outOfBounds = projectile.position.x ** 2 + projectile.position.z ** 2 > (worldState.boundsRadius * 1.3) ** 2;
-    if (projectile.lifetime <= 0 || outOfBounds) {
-      projectile.active = false;
-      continue;
-    }
-
-    if (projectile.owner === "enemy") {
-      const player = worldState.player;
-      if (player.status !== "alive") continue;
-      if (distanceSquared(projectile.position.x, projectile.position.z, player.position.x, player.position.z) <= player.radius ** 2) {
-        projectile.active = false;
-        inflictDamageToPlayer(worldState, CANNON_DAMAGE);
-      }
-      continue;
-    }
-
-    for (const enemy of ecs.enemyTable.values()) {
-      if (enemy.status !== "alive") continue;
-      if (distanceSquared(projectile.position.x, projectile.position.z, enemy.position.x, enemy.position.z) <= enemy.radius ** 2) {
-        projectile.active = false;
-        inflictDamageToEnemy(worldState, ecs, enemy, CANNON_DAMAGE);
-        break;
-      }
-    }
-  }
-}
-
-function cleanupEcsTables(ecs: EcsState): void {
-  for (const projectile of ecs.projectileTable.values()) {
-    if (!projectile.active) {
-      ecs.projectileTable.delete(projectile.id);
-    }
-  }
-  for (const loot of ecs.lootTable.values()) {
-    if (!loot.active) {
-      ecs.lootTable.delete(loot.id);
-    }
-  }
-}
-
-function setEnemyState(enemy: EnemyState, nextState: EnemyState["aiState"]): void {
-  if (enemy.aiState === nextState) {
-    return;
-  }
-  enemy.aiState = nextState;
-  enemy.aiStateTimer = 0;
-}
-
-function enemyAiIntentSystem(worldState: WorldWithEcs, enemy: EnemyState, dt: number): EcsEnemyIntent {
-  const player = worldState.player;
-  const profile = ENEMY_PROFILES[enemy.archetype];
+  const profile = EPF[enemy.archetype];
   enemy.aiStateTimer += dt;
-
-  if (enemy.status !== "alive") {
-    enemy.pendingFireSide = null;
-    return { throttle: 0, turn: 0, fireSide: null };
-  }
+  if (enemy.status !== "alive") return { throttle: 0, turn: 0, fireSide: null };
 
   const dx = player.position.x - enemy.position.x;
   const dz = player.position.z - enemy.position.z;
-  const distance = Math.hypot(dx, dz);
+  const dist = Math.hypot(dx, dz);
   const hpRatio = enemy.maxHp > 0 ? enemy.hp / enemy.maxHp : 1;
+  const flee = enemy.archetype === "merchant" && player.status === "alive" && (dist < profile.broadsideRange * 1.6 || hpRatio < profile.fleeThreshold);
 
-  const shouldFlee =
-    enemy.archetype === "merchant" &&
-    player.status === "alive" &&
-    (distance < profile.broadsideRange * 1.6 || hpRatio < profile.fleeThreshold);
-
-  if (shouldFlee) {
-    setEnemyState(enemy, "flee");
-  } else if (player.status !== "alive" || distance > profile.detectionRange) {
-    setEnemyState(enemy, "patrol");
-  } else if (enemy.aiState === "patrol") {
-    setEnemyState(enemy, "detect");
+  if (flee) enemy.aiState = "flee";
+  else if (player.status !== "alive" || dist > profile.detectionRange) enemy.aiState = "patrol";
+  else if (enemy.aiState === "patrol") {
+    enemy.aiState = "detect";
+    enemy.aiStateTimer = 0;
   }
-
   if (enemy.aiState === "detect" && enemy.aiStateTimer >= 0.45) {
-    setEnemyState(enemy, "chase");
+    enemy.aiState = "chase";
+    enemy.aiStateTimer = 0;
   }
-
-  if (
-    enemy.aiState === "chase" &&
-    distance <= profile.broadsideRange * 1.2 &&
-    enemy.aiStateTimer >= 0.3
-  ) {
-    setEnemyState(enemy, "line_up_broadside");
+  if (enemy.aiState === "chase" && dist <= profile.broadsideRange * 1.2 && enemy.aiStateTimer >= 0.3) {
+    enemy.aiState = "line_up_broadside";
+    enemy.aiStateTimer = 0;
   }
 
   let throttle = 0;
   let turn = 0;
   let fireSide: CannonSide | null = null;
-
   if (enemy.aiState === "flee") {
-    const awayHeading = Math.atan2(-dx, -dz);
     throttle = 1;
-    turn = steeringTowardHeading(enemy.heading, awayHeading);
+    turn = steeringTowardHeading(enemy.heading, Math.atan2(-dx, -dz));
   } else if (enemy.aiState === "patrol") {
     enemy.patrolAngle += dt * (enemy.archetype === "merchant" ? 0.55 : 0.35);
-    const patrolRadius = (33 + (enemy.id % 4) * 5) * WORLD_LAYOUT_SCALE;
-    const targetX = Math.cos(enemy.patrolAngle) * patrolRadius;
-    const targetZ = Math.sin(enemy.patrolAngle) * patrolRadius;
-    const targetHeading = Math.atan2(targetX - enemy.position.x, targetZ - enemy.position.z);
+    const r = (33 + (enemy.id % 4) * 5) * WORLD_LAYOUT_SCALE;
+    const tx = Math.cos(enemy.patrolAngle) * r;
+    const tz = Math.sin(enemy.patrolAngle) * r;
     throttle = enemy.archetype === "navy" ? 0.44 : 0.58;
-    turn = steeringTowardHeading(enemy.heading, targetHeading);
+    turn = steeringTowardHeading(enemy.heading, Math.atan2(tx - enemy.position.x, tz - enemy.position.z));
   } else if (enemy.aiState === "detect") {
-    const targetHeading = Math.atan2(dx, dz);
     throttle = 0.35;
-    turn = steeringTowardHeading(enemy.heading, targetHeading);
+    turn = steeringTowardHeading(enemy.heading, Math.atan2(dx, dz));
   } else {
     const angleToPlayer = Math.atan2(dx, dz);
-    const broadsideLeft = normalizeAngle(angleToPlayer + Math.PI * 0.5);
-    const broadsideRight = normalizeAngle(angleToPlayer - Math.PI * 0.5);
-    const leftDelta = Math.abs(normalizeAngle(broadsideLeft - enemy.heading));
-    const rightDelta = Math.abs(normalizeAngle(broadsideRight - enemy.heading));
-    const targetHeading = leftDelta < rightDelta ? broadsideLeft : broadsideRight;
-
+    const bl = normalizeAngle(angleToPlayer + Math.PI * 0.5);
+    const br = normalizeAngle(angleToPlayer - Math.PI * 0.5);
+    const target = Math.abs(normalizeAngle(bl - enemy.heading)) < Math.abs(normalizeAngle(br - enemy.heading)) ? bl : br;
     if (enemy.aiState === "chase") {
       throttle = enemy.archetype === "navy" ? 0.98 : 0.9;
       turn = steeringTowardHeading(enemy.heading, Math.atan2(dx, dz));
     } else {
-      if (distance > profile.broadsideRange * 1.1) {
-        throttle = 0.52;
-      } else if (distance < profile.broadsideRange * 0.72) {
-        throttle = -0.28;
-      } else {
-        throttle = 0.08;
-      }
-      turn = steeringTowardHeading(enemy.heading, targetHeading);
-
-      const toPlayerLength = Math.hypot(dx, dz);
-      if (toPlayerLength > 0.0001) {
-        const normalizedToPlayerX = dx / toPlayerLength;
-        const normalizedToPlayerZ = dz / toPlayerLength;
-        const forward = calculateForward(enemy.heading);
-        const dot = forward.x * normalizedToPlayerX + forward.z * normalizedToPlayerZ;
-        const sideDot = sideDotAgainstShipLeft(enemy.heading, normalizedToPlayerX, normalizedToPlayerZ);
-
-        const fireDotLimit = enemy.archetype === "navy" ? CANNON_FIRING_CONE_DOT + 0.12 : CANNON_FIRING_CONE_DOT;
-        const canFire =
-          Math.abs(dot) <= fireDotLimit &&
-          toPlayerLength <= profile.broadsideRange * 1.35 &&
-          (enemy.archetype !== "merchant" || toPlayerLength <= profile.broadsideRange * 0.85);
-
+      throttle = dist > profile.broadsideRange * 1.1 ? 0.52 : dist < profile.broadsideRange * 0.72 ? -0.28 : 0.08;
+      turn = steeringTowardHeading(enemy.heading, target);
+      const len = Math.hypot(dx, dz);
+      if (len > 0.0001) {
+        const nx = dx / len;
+        const nz = dz / len;
+        const f = forwardOf(enemy.heading);
+        const dot = f.x * nx + f.z * nz;
+        const sideDot = sideDotAgainstShipLeft(enemy.heading, nx, nz);
+        const fireDot = enemy.archetype === "navy" ? CANNON_FIRING_CONE_DOT + 0.12 : CANNON_FIRING_CONE_DOT;
+        const canFire = Math.abs(dot) <= fireDot && len <= profile.broadsideRange * 1.35 && (enemy.archetype !== "merchant" || len <= profile.broadsideRange * 0.85);
         if (canFire && enemy.aiStateTimer >= 0.18) {
           fireSide = classifySideFromLeftDot(sideDot);
-          setEnemyState(enemy, "fire");
-        } else {
-          setEnemyState(enemy, "line_up_broadside");
+          enemy.aiState = "fire";
+          enemy.aiStateTimer = 0;
         }
       }
     }
   }
-
   if (enemy.aiState === "fire" && enemy.aiStateTimer > 0.22) {
-    setEnemyState(enemy, "line_up_broadside");
+    enemy.aiState = "line_up_broadside";
+    enemy.aiStateTimer = 0;
   }
-
   enemy.pendingFireSide = fireSide;
   return { throttle, turn, fireSide };
 }
 
-function updateLootPhysicsSystem(ecs: EcsState, dt: number): void {
-  for (const loot of ecs.lootTable.values()) {
-    if (!loot.active) continue;
-    loot.position.x += loot.driftVelocity.x * dt;
-    loot.position.z += loot.driftVelocity.z * dt;
-    loot.driftVelocity.x *= Math.exp(-1.7 * dt);
-    loot.driftVelocity.z *= Math.exp(-1.7 * dt);
-    loot.lifetime -= dt;
-    if (loot.lifetime <= 0) {
-      loot.active = false;
+function addProjectile(worldState: WorldWithEcs, ecs: EcsState, ship: ShipState, side: CannonSide): void {
+  const f = forwardOf(ship.heading);
+  const s = getBroadsideVector(ship.heading, side);
+  const dx = s.x * 0.96 + f.x * 0.14;
+  const dz = s.z * 0.96 + f.z * 0.14;
+  const len = Math.hypot(dx, dz);
+  if (len < 0.0001) return;
+  const dirX = dx / len;
+  const dirZ = dz / len;
+  const p: ProjectileState = {
+    id: worldState.nextProjectileId++,
+    owner: ship.owner,
+    position: { x: ship.position.x + s.x * (ship.radius + 1.4) + f.x * 0.8, y: ship.position.y + 1.1, z: ship.position.z + s.z * (ship.radius + 1.4) + f.z * 0.8 },
+    velocity: {
+      x: dirX * CANNON_MUZZLE_VELOCITY + ship.linearVelocity.x * CANNON_INHERIT_SHIP_VELOCITY,
+      y: CANNON_VERTICAL_MUZZLE_VELOCITY + ship.linearVelocity.y * CANNON_INHERIT_SHIP_VELOCITY * 0.35,
+      z: dirZ * CANNON_MUZZLE_VELOCITY + ship.linearVelocity.z * CANNON_INHERIT_SHIP_VELOCITY
+    },
+    lifetime: CANNON_LIFETIME,
+    active: true,
+    mass: CANNON_MASS,
+    gravityScale: CANNON_GRAVITY_SCALE,
+    dragAir: CANNON_DRAG_AIR,
+    dragWater: CANNON_DRAG_WATER,
+    collisionRadius: CANNON_COLLISION_RADIUS,
+    impactImpulse: CANNON_IMPACT_IMPULSE,
+    terminateOnWaterImpact: CANNON_TERMINATE_ON_WATER_IMPACT,
+    waterState: "airborne",
+    collisionLayer: "projectiles"
+  };
+  ecs.projectileTable.set(p.id, p);
+  const invM = 1 / Math.max(1, ship.mass);
+  ship.linearVelocity.x += -(s.x * CANNON_RECOIL_IMPULSE + f.x * CANNON_RECOIL_IMPULSE * 0.2) * invM;
+  ship.linearVelocity.z += -(s.z * CANNON_RECOIL_IMPULSE + f.z * CANNON_RECOIL_IMPULSE * 0.2) * invM;
+  ship.angularVelocity += (side === "left" ? CANNON_RECOIL_YAW : -CANNON_RECOIL_YAW) * invM;
+  ship.rollVelocity += (side === "left" ? CANNON_RECOIL_ROLL : -CANNON_RECOIL_ROLL) * invM;
+}
+
+function reloadDuration(ship: ShipState, enemy?: EnemyState): number {
+  return ship.owner === "player" ? CANNON_RELOAD_TIME : EPF[(enemy ?? (ship as EnemyState)).archetype].reloadDuration;
+}
+
+function tryFire(ship: ShipState, side: CannonSide, worldState: WorldWithEcs, ecs: EcsState, enemy?: EnemyState): boolean {
+  if (ship.status !== "alive" || ship.reload[side] > 0) return false;
+  ship.reload[side] = reloadDuration(ship, enemy);
+  addProjectile(worldState, ecs, ship, side);
+  emitEvent(worldState, { type: "cannon_fire", owner: ship.owner });
+  return true;
+}
+
+function beginShipSinking(worldState: WorldWithEcs, ship: ShipState): void {
+  if (ship.status !== "alive") return;
+  ship.status = "sinking";
+  ship.damageState = "sunk";
+  ship.sinkTimer = SINK_DURATION;
+  ship.throttle = 0;
+  ship.turnInput = 0;
+  emitEvent(worldState, { type: "ship_sunk", owner: ship.owner });
+}
+
+function damagePlayer(worldState: WorldWithEcs, dmg: number): void {
+  const p = worldState.player;
+  if (p.status !== "alive") return;
+  p.hp = Math.max(0, p.hp - dmg);
+  setDamageState(p);
+  emitEvent(worldState, { type: "ship_hit", target: "player" });
+  if (p.hp <= 0) beginShipSinking(worldState, p);
+}
+
+function damageEnemy(worldState: WorldWithEcs, ecs: EcsState, e: EnemyState, dmg: number): void {
+  if (e.status !== "alive") return;
+  e.hp = Math.max(0, e.hp - dmg);
+  setDamageState(e);
+  emitEvent(worldState, { type: "ship_hit", target: "enemy" });
+  if (e.hp <= 0) {
+    beginShipSinking(worldState, e);
+    if (!e.lootDropped) {
+      spawnLoot(worldState, ecs, e);
+      e.lootDropped = true;
+      worldState.flags.enemiesSunk += 1;
+    }
+  }
+}
+
+function shipImpactDamage(worldState: WorldWithEcs, ecs: EcsState, ship: ShipState, speed: number): void {
+  if (speed <= PLAYER_COLLISION_DAMAGE_THRESHOLD) return;
+  const dmg = Math.round((speed - PLAYER_COLLISION_DAMAGE_THRESHOLD) * PLAYER_COLLISION_DAMAGE_MULTIPLIER);
+  if (dmg <= 0) return;
+  if (ship.owner === "player") damagePlayer(worldState, dmg);
+  else damageEnemy(worldState, ecs, ship as EnemyState, Math.max(1, Math.round(dmg * (1 / PLAYER_COLLISION_DAMAGE_MULTIPLIER))));
+}
+
+function collideShipWithIsland(worldState: WorldWithEcs, ecs: EcsState, ship: ShipState): void {
+  if (ship.status !== "alive") return;
+  for (const island of worldState.islands) {
+    const dx = ship.position.x - island.position.x;
+    const dz = ship.position.z - island.position.z;
+    const d = Math.hypot(dx, dz);
+    const minD = ship.radius + island.radius;
+    if (d >= minD) continue;
+    const nx = dx / Math.max(1e-4, d);
+    const nz = dz / Math.max(1e-4, d);
+    const pen = minD - Math.max(1e-4, d);
+    ship.position.x += nx * pen;
+    ship.position.z += nz * pen;
+    const nv = ship.linearVelocity.x * nx + ship.linearVelocity.z * nz;
+    if (nv < 0) {
+      ship.linearVelocity.x += nx * (-(1 + 0.06) * nv);
+      ship.linearVelocity.z += nz * (-(1 + 0.06) * nv);
+      shipImpactDamage(worldState, ecs, ship, Math.abs(nv));
+    }
+  }
+}
+
+function collideShips(worldState: WorldWithEcs, ecs: EcsState, a: ShipState, b: ShipState): void {
+  if (a.status !== "alive" || b.status !== "alive") return;
+  const dx = a.position.x - b.position.x;
+  const dz = a.position.z - b.position.z;
+  const d = Math.hypot(dx, dz);
+  const minD = a.radius + b.radius;
+  if (d >= minD) return;
+  const nx = dx / Math.max(1e-4, d);
+  const nz = dz / Math.max(1e-4, d);
+  const pen = minD - Math.max(1e-4, d);
+  const invA = 1 / Math.max(1, a.mass);
+  const invB = 1 / Math.max(1, b.mass);
+  const inv = Math.max(1e-5, invA + invB);
+  a.position.x += nx * pen * (invA / inv);
+  a.position.z += nz * pen * (invA / inv);
+  b.position.x -= nx * pen * (invB / inv);
+  b.position.z -= nz * pen * (invB / inv);
+  const rvx = a.linearVelocity.x - b.linearVelocity.x;
+  const rvz = a.linearVelocity.z - b.linearVelocity.z;
+  const rvn = rvx * nx + rvz * nz;
+  if (rvn > 0) return;
+  const j = (-(1 + 0.06) * rvn * 0.72) / inv;
+  const ix = j * nx;
+  const iz = j * nz;
+  a.linearVelocity.x += ix * invA;
+  a.linearVelocity.z += iz * invA;
+  b.linearVelocity.x -= ix * invB;
+  b.linearVelocity.z -= iz * invB;
+  shipImpactDamage(worldState, ecs, a, Math.abs(rvn));
+  shipImpactDamage(worldState, ecs, b, Math.abs(rvn));
+}
+
+function projectileSystem(worldState: WorldWithEcs, ecs: EcsState, dt: number): void {
+  for (const p of ecs.projectileTable.values()) {
+    if (!p.active) continue;
+    p.velocity.y += worldState.physics.gravity * p.gravityScale * dt;
+    const drag = p.waterState === "submerged" ? p.dragWater : p.dragAir;
+    const damp = Math.exp(-drag * dt);
+    p.velocity.x *= damp;
+    p.velocity.y *= damp;
+    p.velocity.z *= damp;
+    p.position.x += p.velocity.x * dt;
+    p.position.y += p.velocity.y * dt;
+    p.position.z += p.velocity.z * dt;
+    p.lifetime -= dt;
+    if (p.lifetime <= 0 || p.position.x ** 2 + p.position.z ** 2 > (worldState.boundsRadius * 1.3) ** 2) {
+      p.active = false;
+      continue;
+    }
+    const wh = seaHeight(worldState, p.position.x, p.position.z);
+    if (p.position.y <= wh) {
+      p.waterState = "submerged";
+      p.velocity.x *= 0.42;
+      p.velocity.y *= 0.42;
+      p.velocity.z *= 0.42;
+      if (p.terminateOnWaterImpact) {
+        p.active = false;
+        continue;
+      }
+    }
+    for (const island of worldState.islands) {
+      if (distanceSquared(p.position.x, p.position.z, island.position.x, island.position.z) <= island.radius ** 2) {
+        p.active = false;
+        break;
+      }
+    }
+    if (!p.active) continue;
+    if (p.owner === "enemy") {
+      const ship = worldState.player;
+      if (
+        ship.status === "alive" &&
+        distanceSquared(p.position.x, p.position.z, ship.position.x, ship.position.z) <= (ship.radius + p.collisionRadius) ** 2 &&
+        Math.abs(p.position.y - ship.position.y) <= PROJ_HEIGHT_HIT
+      ) {
+        p.active = false;
+        const len = Math.hypot(p.velocity.x, p.velocity.y, p.velocity.z) || 1;
+        const imp = p.impactImpulse / Math.max(1, ship.mass);
+        ship.linearVelocity.x += (p.velocity.x / len) * imp;
+        ship.linearVelocity.z += (p.velocity.z / len) * imp;
+        damagePlayer(worldState, CANNON_DAMAGE);
+      }
+      continue;
+    }
+    for (const e of ecs.enemyTable.values()) {
+      if (
+        e.status === "alive" &&
+        distanceSquared(p.position.x, p.position.z, e.position.x, e.position.z) <= (e.radius + p.collisionRadius) ** 2 &&
+        Math.abs(p.position.y - e.position.y) <= PROJ_HEIGHT_HIT
+      ) {
+        p.active = false;
+        const len = Math.hypot(p.velocity.x, p.velocity.y, p.velocity.z) || 1;
+        const imp = p.impactImpulse / Math.max(1, e.mass);
+        e.linearVelocity.x += (p.velocity.x / len) * imp;
+        e.linearVelocity.z += (p.velocity.z / len) * imp;
+        e.angularVelocity += (p.velocity.x * p.velocity.z > 0 ? 1 : -1) * 0.08 / e.mass;
+        damageEnemy(worldState, ecs, e, CANNON_DAMAGE);
+        break;
+      }
+    }
+  }
+}
+
+function maybeLoot(worldState: WorldWithEcs, ecs: EcsState, enemy: EnemyState, kind: LootKind, amount: number, angleOffset: number, speed: number): void {
+  if (amount <= 0) return;
+  const angle = enemy.id * 0.71 + angleOffset;
+  const heavy = kind === "cargo";
+  const loot: LootState = {
+    id: worldState.nextLootId++,
+    kind,
+    amount,
+    position: { x: enemy.position.x + Math.cos(angle) * 1.8, y: enemy.position.y + 1, z: enemy.position.z + Math.sin(angle) * 1.8 },
+    velocity: { x: Math.cos(angle) * speed + enemy.linearVelocity.x * 0.2, y: 1.7, z: Math.sin(angle) * speed + enemy.linearVelocity.z * 0.2 },
+    yaw: enemy.heading,
+    angularVelocity: (enemy.id % 2 === 0 ? 1 : -1) * 0.75,
+    mass: heavy ? LOOT_FLOAT_MASS_HEAVY : LOOT_FLOAT_MASS_LIGHT,
+    buoyancyMultiplier: heavy ? LOOT_BUOYANCY_MULTIPLIER_HEAVY : LOOT_BUOYANCY_MULTIPLIER_LIGHT,
+    waterDrag: LOOT_WATER_DRAG,
+    angularDamping: LOOT_ANGULAR_DAMPING,
+    floats: true,
+    waterState: "airborne",
+    lifetime: LOOT_LIFETIME,
+    pickupRadius: LOOT_PICKUP_RADIUS,
+    active: true,
+    collisionLayer: "pickups_debris"
+  };
+  ecs.lootTable.set(loot.id, loot);
+}
+
+function spawnLoot(worldState: WorldWithEcs, ecs: EcsState, enemy: EnemyState): void {
+  const p = EPF[enemy.archetype];
+  maybeLoot(worldState, ecs, enemy, "gold", p.lootGoldBase + (enemy.id % 4) * 5, 0.2, 2.3);
+  maybeLoot(worldState, ecs, enemy, "repair_material", p.lootMaterialBase + (enemy.id % 2), -0.32, 1.5);
+  maybeLoot(worldState, ecs, enemy, "cargo", p.lootCargoBase + (enemy.id % 3), 0.92, 1.8);
+  maybeLoot(worldState, ecs, enemy, "treasure_map", enemy.id % p.mapDropEvery === 0 ? 1 : 0, -0.82, 1.2);
+}
+
+function updateLootPhysics(worldState: WorldWithEcs, ecs: EcsState, dt: number): void {
+  for (const l of ecs.lootTable.values()) {
+    if (!l.active) continue;
+    const wh = seaHeight(worldState, l.position.x, l.position.z);
+    let fy = worldState.physics.gravity * l.mass;
+    const inWater = l.position.y <= wh + 0.05;
+    if (inWater && l.floats) {
+      const sub = wh - l.position.y;
+      if (sub > 0) fy += sub * l.mass * 9.5 * l.buoyancyMultiplier;
+      l.waterState = sub > 0.02 ? "submerged" : "water_entry";
+    } else l.waterState = "airborne";
+    const damp = Math.exp(-(inWater ? l.waterDrag : 0.32) * dt);
+    l.velocity.y += (fy / Math.max(1, l.mass)) * dt;
+    l.velocity.x *= damp;
+    l.velocity.y *= damp;
+    l.velocity.z *= damp;
+    l.position.x += l.velocity.x * dt;
+    l.position.y += l.velocity.y * dt;
+    l.position.z += l.velocity.z * dt;
+    l.angularVelocity *= Math.exp(-l.angularDamping * dt);
+    l.yaw = normalizeAngle(l.yaw + l.angularVelocity * dt);
+    l.lifetime -= dt;
+    if (l.lifetime <= 0) l.active = false;
+  }
+}
+
+function collectLoot(worldState: WorldWithEcs, ecs: EcsState): boolean {
+  let collected = false;
+  for (const l of ecs.lootTable.values()) {
+    if (!l.active) continue;
+    const range = l.pickupRadius + worldState.player.radius * 0.75;
+    if (distanceSquared(worldState.player.position.x, worldState.player.position.z, l.position.x, l.position.z) > range ** 2) continue;
+    l.active = false;
+    collected = true;
+    worldState.flags.lootCollected += 1;
+    if (l.kind === "gold") {
+      worldState.wallet.gold += l.amount;
+      worldState.flags.goldCollected += l.amount;
+    } else if (l.kind === "repair_material") worldState.wallet.repairMaterials += l.amount;
+    else if (l.kind === "cargo") worldState.wallet.cargo += l.amount;
+    else {
+      worldState.wallet.treasureMaps += l.amount;
+      worldState.treasureObjective.queuedMaps += l.amount;
+      if (!worldState.treasureObjective.active) activateTreasureObjective(worldState, true);
+    }
+    emitEvent(worldState, { type: "loot_pickup", kind: l.kind, amount: l.amount });
+  }
+  return collected;
+}
+
+function tryRepair(worldState: WorldWithEcs): void {
+  const p = worldState.player;
+  if (p.status !== "alive" || p.repairCooldown > 0 || p.hp >= p.maxHp || worldState.wallet.repairMaterials <= 0) return;
+  worldState.wallet.repairMaterials -= 1;
+  p.hp = Math.min(p.maxHp, p.hp + PLAYER_REPAIR_AMOUNT);
+  p.repairCooldown = PLAYER_REPAIR_COOLDOWN;
+  setDamageState(p);
+  emitEvent(worldState, { type: "repair_used" });
+}
+
+function updateBurst(worldState: WorldWithEcs, inputState: InputState, dt: number): void {
+  const b = worldState.burst;
+  const oldCd = b.cooldown;
+  b.cooldown = Math.max(0, b.cooldown - dt);
+  if (oldCd > 0 && b.cooldown === 0) emitEvent(worldState, { type: "burst_ready" });
+  if (worldState.player.status !== "alive" || worldState.port.menuOpen) {
+    b.active = false;
+    b.remaining = 0;
+    return;
+  }
+  if (b.active) {
+    b.remaining = Math.max(0, b.remaining - dt);
+    if (b.remaining <= 0) {
+      b.active = false;
+      b.cooldown = PLAYER_BURST_COOLDOWN;
+    }
+  }
+  if (!b.active && inputState.burst && b.cooldown <= 0) {
+    b.active = true;
+    b.remaining = PLAYER_BURST_DURATION;
+    emitEvent(worldState, { type: "burst_started" });
+  }
+}
+
+function updateSinking(worldState: WorldWithEcs, ecs: EcsState, dt: number): void {
+  const p = worldState.player;
+  if (p.status === "sinking") {
+    p.sinkTimer = Math.max(0, p.sinkTimer - dt);
+    p.buoyancyLoss = clamp(p.buoyancyLoss + dt * SINK_BUOY_LOSS_RATE, 0, 1);
+    p.rollVelocity += 0.12 * dt;
+    p.pitchVelocity += 0.08 * dt;
+    p.linearVelocity.x *= Math.exp(-1.1 * dt);
+    p.linearVelocity.z *= Math.exp(-1.1 * dt);
+    p.linearVelocity.y -= 2 * dt;
+    p.position.y += p.linearVelocity.y * dt;
+    p.roll = clamp(p.roll + p.rollVelocity * dt, -1.1, 1.1);
+    p.pitch = clamp(p.pitch + p.pitchVelocity * dt, -0.8, 0.8);
+    if (p.sinkTimer <= 0) {
+      p.position.x = PLAYER_RESPAWN.x;
+      p.position.y = PLAYER_RESPAWN.y;
+      p.position.z = PLAYER_RESPAWN.z;
+      p.heading = PLAYER_RESPAWN.heading;
+      p.pitch = 0;
+      p.roll = 0;
+      p.linearVelocity = { x: 0, y: 0, z: 0 };
+      p.angularVelocity = 0;
+      p.pitchVelocity = 0;
+      p.rollVelocity = 0;
+      p.speed = 0;
+      p.drift = 0;
+      p.throttle = 0;
+      p.turnInput = 0;
+      p.hp = p.maxHp;
+      p.reload.left = 0;
+      p.reload.right = 0;
+      p.status = "alive";
+      p.damageState = "healthy";
+      p.sinkTimer = 0;
+      p.repairCooldown = 0;
+      p.buoyancyLoss = 0;
+      p.waterState = "submerged";
+      worldState.flags.playerRespawns += 1;
+    }
+  }
+  for (const e of ecs.enemyTable.values()) {
+    if (e.status !== "sinking") continue;
+    e.sinkTimer = Math.max(0, e.sinkTimer - dt);
+    e.buoyancyLoss = clamp(e.buoyancyLoss + dt * SINK_BUOY_LOSS_RATE, 0, 1);
+    e.rollVelocity += 0.1 * dt;
+    e.linearVelocity.x *= Math.exp(-1.2 * dt);
+    e.linearVelocity.z *= Math.exp(-1.2 * dt);
+    e.linearVelocity.y -= 2.1 * dt;
+    e.position.y += e.linearVelocity.y * dt;
+    if (e.sinkTimer <= 0) {
+      ecs.enemyTable.delete(e.id);
+      ecs.shipTable.delete(e.id);
     }
   }
 }
 
 function activateTreasureObjective(worldState: WorldWithEcs, fromMap: boolean): void {
-  const treasureIslands = worldState.islands.filter((island) => island.kind === "treasure" || island.kind === "scenic");
-  if (treasureIslands.length === 0) return;
-  const index = worldState.treasureObjective.completedCount % treasureIslands.length;
-  const targetIsland = treasureIslands[index]!;
+  const islands = worldState.islands.filter((i) => i.kind === "treasure" || i.kind === "scenic");
+  if (islands.length === 0) return;
+  const idx = worldState.treasureObjective.completedCount % islands.length;
+  const target = islands[idx]!;
   worldState.treasureObjective.active = true;
   worldState.treasureObjective.fromMap = fromMap;
-  worldState.treasureObjective.targetIslandId = targetIsland.id;
-  worldState.treasureObjective.markerPosition.x = targetIsland.position.x;
-  worldState.treasureObjective.markerPosition.z = targetIsland.position.z;
-  worldState.treasureObjective.rewardGold =
-    TREASURE_REWARD_BASE + worldState.treasureObjective.completedCount * TREASURE_REWARD_STEP;
+  worldState.treasureObjective.targetIslandId = target.id;
+  worldState.treasureObjective.markerPosition.x = target.position.x;
+  worldState.treasureObjective.markerPosition.z = target.position.z;
+  worldState.treasureObjective.rewardGold = TREASURE_REWARD_BASE + worldState.treasureObjective.completedCount * TREASURE_REWARD_STEP;
 }
 
-function queueTreasureMapObjectives(worldState: WorldWithEcs, amount: number): void {
-  if (amount <= 0) {
-    return;
-  }
-  worldState.treasureObjective.queuedMaps += amount;
-  if (!worldState.treasureObjective.active) {
-    activateTreasureObjective(worldState, true);
-  }
-}
-
-function collectLootSystem(worldState: WorldWithEcs, ecs: EcsState): boolean {
-  const player = worldState.player;
-  let collected = false;
-
-  for (const loot of ecs.lootTable.values()) {
-    if (!loot.active) continue;
-
-    const pickupRange = loot.pickupRadius + player.radius * 0.75;
-    if (distanceSquared(player.position.x, player.position.z, loot.position.x, loot.position.z) > pickupRange * pickupRange) {
-      continue;
-    }
-
-    loot.active = false;
-    collected = true;
-    worldState.flags.lootCollected += 1;
-
-    switch (loot.kind) {
-      case "gold":
-        worldState.wallet.gold += loot.amount;
-        worldState.flags.goldCollected += loot.amount;
-        break;
-      case "repair_material":
-        worldState.wallet.repairMaterials += loot.amount;
-        break;
-      case "cargo":
-        worldState.wallet.cargo += loot.amount;
-        break;
-      case "treasure_map":
-        worldState.wallet.treasureMaps += loot.amount;
-        queueTreasureMapObjectives(worldState, loot.amount);
-        break;
-    }
-
-    emitEvent(worldState, { type: "loot_pickup", kind: loot.kind, amount: loot.amount });
-  }
-
-  return collected;
-}
-
-function tryCollectTreasureObjective(worldState: WorldWithEcs): boolean {
+function tryCollectTreasure(worldState: WorldWithEcs): boolean {
   if (!worldState.treasureObjective.active) return false;
-  const marker = worldState.treasureObjective.markerPosition;
-  const player = worldState.player;
-  if (distanceSquared(player.position.x, player.position.z, marker.x, marker.z) > TREASURE_INTERACT_RADIUS ** 2) {
-    return false;
-  }
-
-  const reward = worldState.treasureObjective.rewardGold;
-  worldState.wallet.gold += reward;
-  worldState.flags.goldCollected += reward;
+  const m = worldState.treasureObjective.markerPosition;
+  const p = worldState.player.position;
+  if (distanceSquared(p.x, p.z, m.x, m.z) > TREASURE_INTERACT_RADIUS ** 2) return false;
+  const r = worldState.treasureObjective.rewardGold;
+  worldState.wallet.gold += r;
+  worldState.flags.goldCollected += r;
   worldState.wallet.repairMaterials += 1;
   worldState.treasureObjective.completedCount += 1;
-
   if (worldState.treasureObjective.fromMap) {
     worldState.wallet.treasureMaps = Math.max(0, worldState.wallet.treasureMaps - 1);
     worldState.treasureObjective.queuedMaps = Math.max(0, worldState.treasureObjective.queuedMaps - 1);
     emitEvent(worldState, { type: "treasure_map_used" });
   }
-
   worldState.treasureObjective.active = false;
   worldState.treasureObjective.fromMap = false;
   worldState.treasureObjective.targetIslandId = null;
   worldState.eventDirector.statusText = "Treasure secured! Spend your haul at port.";
-  emitEvent(worldState, { type: "treasure_collected", amount: reward });
-  emitEvent(worldState, { type: "loot_pickup", kind: "gold", amount: reward });
-
+  emitEvent(worldState, { type: "treasure_collected", amount: r });
+  emitEvent(worldState, { type: "loot_pickup", kind: "gold", amount: r });
   if (worldState.eventDirector.activeKind === "treasure_marker") {
     worldState.eventDirector.activeKind = null;
     worldState.eventDirector.remaining = 0;
     worldState.eventDirector.timer = worldState.eventDirector.interval * 0.7;
   }
-
-  if (worldState.treasureObjective.queuedMaps > 0) {
-    activateTreasureObjective(worldState, true);
-  }
-
+  if (worldState.treasureObjective.queuedMaps > 0) activateTreasureObjective(worldState, true);
   return true;
 }
 
-function tryRepair(worldState: WorldWithEcs): void {
-  const player = worldState.player;
-  if (player.status !== "alive") return;
-  if (player.repairCooldown > 0) return;
-  if (player.hp >= player.maxHp) return;
-  if (worldState.wallet.repairMaterials <= 0) return;
-
-  worldState.wallet.repairMaterials -= 1;
-  player.hp = Math.min(player.maxHp, player.hp + PLAYER_REPAIR_AMOUNT);
-  player.repairCooldown = PLAYER_REPAIR_COOLDOWN;
-  emitEvent(worldState, { type: "repair_used" });
-}
-
 function spawnConvoy(worldState: WorldWithEcs, ecs: EcsState): void {
-  const base = chooseSpawnPoint(worldState);
-  spawnEnemy(worldState, ecs, "merchant", base);
-  spawnEnemy(worldState, ecs, "raider", {
-    x: base.x + Math.cos(base.heading + Math.PI * 0.5) * 7,
-    z: base.z + Math.sin(base.heading + Math.PI * 0.5) * 7,
-    heading: normalizeAngle(base.heading + 0.1)
-  });
+  const b = chooseSpawnPoint(worldState);
+  spawnEnemy(worldState, ecs, "merchant", b);
+  spawnEnemy(worldState, ecs, "raider", { x: b.x + Math.cos(b.heading + Math.PI * 0.5) * 7, z: b.z + Math.sin(b.heading + Math.PI * 0.5) * 7, heading: normalizeAngle(b.heading + 0.1) });
 }
 
 function spawnNavyPatrol(worldState: WorldWithEcs, ecs: EcsState): void {
-  const navyAlive = [...ecs.enemyTable.values()].some((enemy) => enemy.status === "alive" && enemy.archetype === "navy");
-  if (!navyAlive) {
-    spawnEnemy(worldState, ecs, "navy");
-  }
+  const navyAlive = [...ecs.enemyTable.values()].some((e) => e.status === "alive" && e.archetype === "navy");
+  if (!navyAlive) spawnEnemy(worldState, ecs, "navy");
 }
 
 function activateStorm(worldState: WorldWithEcs): void {
-  const candidates = worldState.islands.filter((island) => island.kind === "hostile" || island.kind === "scenic");
-  const pick = candidates[worldState.eventDirector.cycleIndex % Math.max(1, candidates.length)] ?? worldState.islands[0];
+  const c = worldState.islands.filter((i) => i.kind === "hostile" || i.kind === "scenic");
+  const pick = c[worldState.eventDirector.cycleIndex % Math.max(1, c.length)] ?? worldState.islands[0];
   if (!pick) return;
   worldState.storm.active = true;
   worldState.storm.center.x = pick.position.x;
@@ -885,123 +922,59 @@ function activateStorm(worldState: WorldWithEcs): void {
   worldState.storm.intensity = STORM_INTENSITY_MAX;
 }
 
-function startWorldEvent(worldState: WorldWithEcs, ecs: EcsState, kind: WorldEventKind): void {
+function startEvent(worldState: WorldWithEcs, ecs: EcsState, kind: WorldEventKind): void {
   worldState.eventDirector.activeKind = kind;
   emitEvent(worldState, { type: "world_event_started", kind });
-
-  switch (kind) {
-    case "treasure_marker":
-      if (!worldState.treasureObjective.active) {
-        activateTreasureObjective(worldState, false);
-      }
-      worldState.eventDirector.remaining = EVENT_TREASURE_DURATION;
-      worldState.eventDirector.statusText = "Treasure marker sighted. Reach the beacon and press Space.";
-      break;
-    case "enemy_convoy":
-      spawnConvoy(worldState, ecs);
-      worldState.eventDirector.remaining = EVENT_CONVOY_DURATION;
-      worldState.eventDirector.statusText = "Merchant convoy spotted with raider escort.";
-      break;
-    case "storm":
-      activateStorm(worldState);
-      worldState.eventDirector.remaining = EVENT_STORM_DURATION;
-      worldState.eventDirector.statusText = "Storm front rolling in. Visibility and speed reduced.";
-      break;
-    case "navy_patrol":
-      spawnNavyPatrol(worldState, ecs);
-      worldState.eventDirector.remaining = EVENT_NAVY_DURATION;
-      worldState.eventDirector.statusText = "Navy patrol has entered contested waters.";
-      break;
+  if (kind === "treasure_marker") {
+    if (!worldState.treasureObjective.active) activateTreasureObjective(worldState, false);
+    worldState.eventDirector.remaining = EVENT_TREASURE_DURATION;
+    worldState.eventDirector.statusText = "Treasure marker sighted. Reach the beacon and press Space.";
+  } else if (kind === "enemy_convoy") {
+    spawnConvoy(worldState, ecs);
+    worldState.eventDirector.remaining = EVENT_CONVOY_DURATION;
+    worldState.eventDirector.statusText = "Merchant convoy spotted with raider escort.";
+  } else if (kind === "storm") {
+    activateStorm(worldState);
+    worldState.eventDirector.remaining = EVENT_STORM_DURATION;
+    worldState.eventDirector.statusText = "Storm front rolling in. Visibility and speed reduced.";
+  } else {
+    spawnNavyPatrol(worldState, ecs);
+    worldState.eventDirector.remaining = EVENT_NAVY_DURATION;
+    worldState.eventDirector.statusText = "Navy patrol has entered contested waters.";
   }
 }
 
-function eventTimerSystem(worldState: WorldWithEcs, ecs: EcsState, dt: number): void {
-  const director = worldState.eventDirector;
-
-  if (director.activeKind) {
-    director.remaining = Math.max(0, director.remaining - dt);
+function eventTimer(worldState: WorldWithEcs, ecs: EcsState, dt: number): void {
+  const d = worldState.eventDirector;
+  if (d.activeKind) {
+    d.remaining = Math.max(0, d.remaining - dt);
     if (worldState.storm.active) {
       worldState.storm.remaining = Math.max(0, worldState.storm.remaining - dt);
-      if (worldState.storm.remaining <= 0) {
-        worldState.storm.active = false;
-      }
+      if (worldState.storm.remaining <= 0) worldState.storm.active = false;
     }
-
-    if (director.remaining <= 0) {
-      director.activeKind = null;
-      director.timer = director.interval;
-      if (!worldState.treasureObjective.active) {
-        director.statusText = "Scanning the horizon for the next encounter.";
-      }
+    if (d.remaining <= 0) {
+      d.activeKind = null;
+      d.timer = d.interval;
+      if (!worldState.treasureObjective.active) d.statusText = "Scanning the horizon for the next encounter.";
       worldState.storm.active = false;
       worldState.storm.remaining = 0;
     }
     return;
   }
-
-  director.timer -= dt;
-  if (director.timer > 0) {
-    return;
-  }
-
-  const kind = EVENT_CYCLE[director.cycleIndex % EVENT_CYCLE.length]!;
-  director.cycleIndex += 1;
-  startWorldEvent(worldState, ecs, kind);
-}
-
-function updateBurstSystem(worldState: WorldWithEcs, inputState: InputState, dt: number): void {
-  const burst = worldState.burst;
-  const playerAlive = worldState.player.status === "alive";
-
-  const oldCooldown = burst.cooldown;
-  burst.cooldown = Math.max(0, burst.cooldown - dt);
-
-  if (oldCooldown > 0 && burst.cooldown === 0) {
-    emitEvent(worldState, { type: "burst_ready" });
-  }
-
-  if (!playerAlive || worldState.port.menuOpen) {
-    burst.active = false;
-    burst.remaining = 0;
-    return;
-  }
-
-  if (burst.active) {
-    burst.remaining = Math.max(0, burst.remaining - dt);
-    if (burst.remaining <= 0) {
-      burst.active = false;
-      burst.cooldown = PLAYER_BURST_COOLDOWN;
-    }
-  }
-
-  if (!burst.active && inputState.burst && burst.cooldown <= 0) {
-    burst.active = true;
-    burst.remaining = PLAYER_BURST_DURATION;
-    emitEvent(worldState, { type: "burst_started" });
-  }
-}
-
-function getPlayerMovementTuning(worldState: WorldWithEcs): MovementTuning {
-  if (!worldState.burst.active) {
-    return PLAYER_TUNING;
-  }
-  return {
-    ...PLAYER_TUNING,
-    acceleration: PLAYER_TUNING.acceleration * 1.2,
-    brakeAcceleration: (PLAYER_TUNING.brakeAcceleration ?? PLAYER_TUNING.acceleration) * 1.1,
-    maxForwardSpeed: PLAYER_TUNING.maxForwardSpeed * PLAYER_BURST_SPEED_MULTIPLIER
-  };
+  d.timer -= dt;
+  if (d.timer > 0) return;
+  const kind = EVENT_CYCLE[d.cycleIndex % EVENT_CYCLE.length]!;
+  d.cycleIndex += 1;
+  startEvent(worldState, ecs, kind);
 }
 
 function trySellCargo(worldState: WorldWithEcs): boolean {
-  if (!worldState.port.menuOpen) return false;
-  if (worldState.wallet.cargo <= 0) return false;
-
+  if (!worldState.port.menuOpen || worldState.wallet.cargo <= 0) return false;
   const amount = worldState.wallet.cargo;
-  const goldGained = amount * CARGO_SALE_VALUE;
+  const gold = amount * CARGO_SALE_VALUE;
   worldState.wallet.cargo = 0;
-  worldState.wallet.gold += goldGained;
-  emitEvent(worldState, { type: "cargo_sold", amount, goldGained });
+  worldState.wallet.gold += gold;
+  emitEvent(worldState, { type: "cargo_sold", amount, goldGained: gold });
   return true;
 }
 
@@ -1010,43 +983,23 @@ function updateCombatIntensity(worldState: WorldWithEcs, ecs: EcsState, dt: numb
     worldState.combatIntensity = Math.max(0, worldState.combatIntensity - dt * 1.8);
     return;
   }
-
-  let nearestDistance = Number.POSITIVE_INFINITY;
-  for (const enemy of ecs.enemyTable.values()) {
-    if (enemy.status !== "alive") continue;
-    const distance = Math.sqrt(distanceSquared(worldState.player.position.x, worldState.player.position.z, enemy.position.x, enemy.position.z));
-    if (distance < nearestDistance) {
-      nearestDistance = distance;
-    }
+  let near = Number.POSITIVE_INFINITY;
+  for (const e of ecs.enemyTable.values()) {
+    if (e.status !== "alive") continue;
+    const d = Math.sqrt(distanceSquared(worldState.player.position.x, worldState.player.position.z, e.position.x, e.position.z));
+    if (d < near) near = d;
   }
+  let t = 0.08;
+  if (Number.isFinite(near)) t = near < 24 ? 1 : near < 40 ? 0.72 : near < 62 ? 0.45 : 0.22;
+  if (ecs.projectileTable.size > 2) t = Math.min(1, t + 0.16);
+  if (insideStorm(worldState, worldState.player)) t = Math.min(1, t + 0.08);
+  const a = clamp(dt * 2.8, 0, 1);
+  worldState.combatIntensity = clamp(worldState.combatIntensity + (t - worldState.combatIntensity) * a, 0, 1);
+}
 
-  let target = 0.08;
-  if (Number.isFinite(nearestDistance)) {
-    if (nearestDistance < 24) target = 1;
-    else if (nearestDistance < 40) target = 0.72;
-    else if (nearestDistance < 62) target = 0.45;
-    else target = 0.22;
-  }
-
-  if (ecs.projectileTable.size > 2) {
-    target = Math.min(1, target + 0.16);
-  }
-
-  if (
-    worldState.storm.active &&
-    distanceSquared(
-      worldState.player.position.x,
-      worldState.player.position.z,
-      worldState.storm.center.x,
-      worldState.storm.center.z
-    ) <= worldState.storm.radius ** 2
-  ) {
-    target = Math.min(1, target + 0.08);
-  }
-
-  const lerp = clamp(dt * 2.8, 0, 1);
-  worldState.combatIntensity += (target - worldState.combatIntensity) * lerp;
-  worldState.combatIntensity = clamp(worldState.combatIntensity, 0, 1);
+function cleanup(ecs: EcsState): void {
+  for (const p of ecs.projectileTable.values()) if (!p.active) ecs.projectileTable.delete(p.id);
+  for (const l of ecs.lootTable.values()) if (!l.active) ecs.lootTable.delete(l.id);
 }
 
 export function closePortMenuEcs(worldState: WorldWithEcs): void {
@@ -1054,14 +1007,15 @@ export function closePortMenuEcs(worldState: WorldWithEcs): void {
 }
 
 export function tryPurchaseHullUpgradeEcs(worldState: WorldWithEcs): boolean {
-  if (!worldState.port.menuOpen) return false;
-  if (worldState.wallet.gold < worldState.upgrade.nextCost) return false;
-
+  if (!worldState.port.menuOpen || worldState.wallet.gold < worldState.upgrade.nextCost) return false;
   worldState.wallet.gold -= worldState.upgrade.nextCost;
   worldState.upgrade.hullLevel += 1;
   worldState.upgrade.nextCost += UPGRADE_HULL_COST_STEP;
   worldState.player.maxHp += UPGRADE_HULL_HP_BONUS;
   worldState.player.hp = Math.min(worldState.player.maxHp, worldState.player.hp + UPGRADE_HULL_HP_BONUS);
+  worldState.player.mass += 1.4;
+  worldState.player.buoyancyStrength += 10;
+  setDamageState(worldState.player);
   emitEvent(worldState, { type: "upgrade_purchased", level: worldState.upgrade.hullLevel });
   return true;
 }
@@ -1078,131 +1032,73 @@ export function drainSimulationEventsEcs(worldState: WorldWithEcs): SimulationEv
 
 export function updateEcsSimulation(worldState: WorldWithEcs, inputState: InputState, dt: number): void {
   if (dt <= 0) return;
-
   const ecs = ensureEcsState(worldState);
   syncEcsFromWorldView(worldState, ecs);
   worldState.time += dt;
-
-  // 1) input capture
   updatePortRange(worldState);
-  let interactRequested = false;
+  let interact = false;
   if (inputState.interact) {
-    if (worldState.port.menuOpen) {
-      togglePortMenu(worldState, false);
-    } else {
-      interactRequested = true;
-    }
+    if (worldState.port.menuOpen) togglePortMenu(worldState, false);
+    else interact = true;
   }
-
-  // 10) port/menu/upgrade (menu pauses simulation progression)
   if (worldState.port.menuOpen) {
-    if (inputState.repair) {
-      tryRepair(worldState);
-    }
+    if (inputState.repair) tryRepair(worldState);
     updateCombatIntensity(worldState, ecs, dt);
     syncWorldViewFromEcs(worldState, ecs);
     return;
   }
-
-  // 2) event timers
-  eventTimerSystem(worldState, ecs, dt);
-
-  // Base ticking for ship combat cooldowns.
-  decreaseReloadTimers(worldState.player, dt);
-  for (const enemy of ecs.enemyTable.values()) {
-    decreaseReloadTimers(enemy, dt);
-  }
-
-  // Burst progression
-  updateBurstSystem(worldState, inputState, dt);
-
-  // 3) AI intent
-  const enemyIntents = ecs.enemyIntentScratch;
-  enemyIntents.clear();
-  for (const enemy of ecs.enemyTable.values()) {
-    enemyIntents.set(enemy.id, enemyAiIntentSystem(worldState, enemy, dt));
-  }
-
-  // 4) movement
+  eventTimer(worldState, ecs, dt);
+  decReload(worldState.player, dt);
+  for (const e of ecs.enemyTable.values()) decReload(e, dt);
+  updateBurst(worldState, inputState, dt);
+  const intents = ecs.enemyIntentScratch;
+  intents.clear();
+  for (const e of ecs.enemyTable.values()) intents.set(e.id, enemyIntent(worldState, e, dt));
   if (worldState.player.status === "alive") {
-    const playerTuning = getPlayerMovementTuning(worldState);
-    moveShip(worldState.player, inputState.throttle, inputState.turn, dt, playerTuning);
-    keepPlayerInBoundsSoft(worldState.player, worldState.boundsRadius);
+    updateShipPhysics(worldState, worldState.player, inputState.throttle, inputState.turn, dt, worldState.burst.active ? PLAYER_BURST_THRUST_MULTIPLIER : 1);
+    keepInBounds(worldState, worldState.player, true);
   }
-
-  for (const enemy of ecs.enemyTable.values()) {
-    if (enemy.status !== "alive") {
-      continue;
-    }
-    const intent = enemyIntents.get(enemy.id) ?? { throttle: 0, turn: 0, fireSide: null };
-    moveShip(enemy, intent.throttle, intent.turn, dt, ENEMY_PROFILES[enemy.archetype].movement);
-    keepShipInBoundsHard(enemy, worldState.boundsRadius);
+  for (const e of ecs.enemyTable.values()) {
+    if (e.status !== "alive") continue;
+    const i = intents.get(e.id) ?? { throttle: 0, turn: 0, fireSide: null };
+    updateShipPhysics(worldState, e, i.throttle, i.turn, dt);
+    keepInBounds(worldState, e, false);
   }
-
-  // 5) storm effects
-  applyStormPenalty(worldState, worldState.player, dt);
-  for (const enemy of ecs.enemyTable.values()) {
-    applyStormPenalty(worldState, enemy, dt);
-  }
-
-  // 6) combat fire
+  const ships = [...ecs.shipTable.values()];
+  for (const s of ships) collideShipWithIsland(worldState, ecs, s);
+  for (let i = 0; i < ships.length; i += 1) for (let j = i + 1; j < ships.length; j += 1) if (ships[i] && ships[j]) collideShips(worldState, ecs, ships[i]!, ships[j]!);
   if (worldState.player.status === "alive") {
-    if (inputState.fireLeft) {
-      tryFire(worldState.player, "left", worldState, ecs);
-    }
-    if (inputState.fireRight) {
-      tryFire(worldState.player, "right", worldState, ecs);
-    }
-    if (inputState.repair) {
-      tryRepair(worldState);
-    }
+    if (inputState.fireLeft) tryFire(worldState.player, "left", worldState, ecs);
+    if (inputState.fireRight) tryFire(worldState.player, "right", worldState, ecs);
+    if (inputState.repair) tryRepair(worldState);
   }
-
-  for (const enemy of ecs.enemyTable.values()) {
-    if (enemy.status !== "alive") {
-      continue;
-    }
-    const intent = enemyIntents.get(enemy.id);
-    if (enemy.aiState === "fire" && intent?.fireSide) {
-      const fired = tryFire(enemy, intent.fireSide, worldState, ecs, enemy);
-      if (fired) {
-        setEnemyState(enemy, "line_up_broadside");
+  for (const e of ecs.enemyTable.values()) {
+    if (e.status !== "alive") continue;
+    const i = intents.get(e.id);
+    if (e.aiState === "fire" && i?.fireSide) {
+      const f = tryFire(e, i.fireSide, worldState, ecs, e);
+      if (f) {
+        e.aiState = "line_up_broadside";
+        e.aiStateTimer = 0;
       }
     }
   }
-
-  // 7) projectile motion/hits
-  projectileMotionSystem(worldState, ecs, dt);
-
-  // 8) sinking/respawn
-  updatePlayerRespawnSystem(worldState, dt);
-  updateEnemySinkingSystem(ecs, dt);
-
-  // 9) loot lifecycle/pickup
-  updateLootPhysicsSystem(ecs, dt);
-  let interactionConsumed = false;
-  if (interactRequested) {
-    interactionConsumed = collectLootSystem(worldState, ecs);
-    if (!interactionConsumed) {
-      interactionConsumed = tryCollectTreasureObjective(worldState);
-    }
+  projectileSystem(worldState, ecs, dt);
+  updateSinking(worldState, ecs, dt);
+  updateLootPhysics(worldState, ecs, dt);
+  let consumed = false;
+  if (interact) {
+    consumed = collectLoot(worldState, ecs);
+    if (!consumed) consumed = tryCollectTreasure(worldState);
   }
-
-  // 10) port/menu/upgrade
   updatePortRange(worldState);
-  if (interactRequested && !interactionConsumed && worldState.port.playerInRange) {
-    togglePortMenu(worldState, true);
-  }
-
-  if (!worldState.treasureObjective.active && worldState.treasureObjective.queuedMaps > 0) {
-    activateTreasureObjective(worldState, true);
-  }
-
+  if (interact && !consumed && worldState.port.playerInRange) togglePortMenu(worldState, true);
+  if (!worldState.treasureObjective.active && worldState.treasureObjective.queuedMaps > 0) activateTreasureObjective(worldState, true);
   worldState.spawnDirector.timer -= dt;
   spawnEnemyIfNeeded(worldState, ecs);
-
-  // 11) cleanup/projection
-  cleanupEcsTables(ecs);
+  setDamageState(worldState.player);
+  for (const e of ecs.enemyTable.values()) setDamageState(e);
+  cleanup(ecs);
   updateCombatIntensity(worldState, ecs, dt);
   syncWorldViewFromEcs(worldState, ecs);
 }

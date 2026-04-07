@@ -10,6 +10,11 @@ Implement a performant wake system for player and enemy ships that feels
 embedded in the water, scales with speed, and avoids the current
 "flat transparent quad" look.
 
+Cross-spec dependency:
+
+- Spec 11 provides authoritative ship physics state (position/heading/velocity)
+  that wake sampling should consume.
+
 ## 1. Scope
 
 This system covers:
@@ -82,6 +87,11 @@ Inputs:
 - ship linear speed.
 - optional turn rate.
 - optional boost state.
+
+Input ownership rule:
+
+- Wake should derive from simulation-authoritative movement data rather than
+  independent render-estimated velocity.
 
 ### 4.2 Stern Turbulence
 

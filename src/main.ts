@@ -14,6 +14,7 @@ import {
 } from "./game/render";
 import {
   FIXED_TIME_STEP,
+  FIXED_TIME_STEP_30,
   MAX_FRAME_DT,
   closePortMenu,
   createInitialWorldState,
@@ -30,6 +31,9 @@ if (!app) {
 }
 
 const worldState = createInitialWorldState();
+const requestedPhysicsHz = Number(import.meta.env.VITE_PHYSICS_TICK_HZ);
+const selectedFixedStep = requestedPhysicsHz === 30 ? FIXED_TIME_STEP_30 : FIXED_TIME_STEP;
+worldState.physics.tickRateHz = selectedFixedStep === FIXED_TIME_STEP_30 ? 30 : 60;
 const shouldExposeDebugHandles =
   import.meta.env.DEV && (import.meta.env.VITE_E2E_DEBUG === "1" || import.meta.env.VITE_DEBUG_WORLD === "1");
 const debugWindow = window as Window & {
@@ -86,13 +90,28 @@ let fpsFrameCount = 0;
 let fps = 60;
 let uiRenderAccumulator = 1 / 30;
 
+const getShipSpeed = (ship: typeof worldState.player): number => {
+  const forwardX = Math.sin(ship.heading);
+  const forwardZ = Math.cos(ship.heading);
+  return ship.linearVelocity.x * forwardX + ship.linearVelocity.z * forwardZ;
+};
+
+const getShipDrift = (ship: typeof worldState.player): number => {
+  const leftX = -Math.cos(ship.heading);
+  const leftZ = Math.sin(ship.heading);
+  return ship.linearVelocity.x * leftX + ship.linearVelocity.z * leftZ;
+};
+
 const previousSnapshot: RenderPreviousSnapshot = {
   player: {
     x: worldState.player.position.x,
+    y: worldState.player.position.y,
     z: worldState.player.position.z,
     heading: worldState.player.heading,
-    speed: worldState.player.speed,
-    drift: worldState.player.drift,
+    pitch: worldState.player.pitch,
+    roll: worldState.player.roll,
+    speed: getShipSpeed(worldState.player),
+    drift: getShipDrift(worldState.player),
     throttle: worldState.player.throttle
   },
   enemies: new Map(),
@@ -102,7 +121,7 @@ const previousSnapshot: RenderPreviousSnapshot = {
 
 const interpolationContext: RenderInterpolationContext = {
   alpha: 0,
-  fixedStep: FIXED_TIME_STEP,
+  fixedStep: selectedFixedStep,
   previousSnapshot
 };
 
@@ -114,15 +133,19 @@ const snapshotSeenIds = {
 
 const copyShipSnapshot = (target: RenderShipSnapshot, source: typeof worldState.player): void => {
   target.x = source.position.x;
+  target.y = source.position.y;
   target.z = source.position.z;
   target.heading = source.heading;
-  target.speed = source.speed;
-  target.drift = source.drift;
+  target.pitch = source.pitch;
+  target.roll = source.roll;
+  target.speed = getShipSpeed(source);
+  target.drift = getShipDrift(source);
   target.throttle = source.throttle;
 };
 
-const copyPositionSnapshot = (target: RenderPositionSnapshot, x: number, z: number): void => {
+const copyPositionSnapshot = (target: RenderPositionSnapshot, x: number, y: number, z: number): void => {
   target.x = x;
+  target.y = y;
   target.z = z;
 };
 
@@ -135,10 +158,13 @@ const capturePreviousSnapshot = (): void => {
     if (!target) {
       target = {
         x: enemy.position.x,
+        y: enemy.position.y,
         z: enemy.position.z,
         heading: enemy.heading,
-        speed: enemy.speed,
-        drift: enemy.drift,
+        pitch: enemy.pitch,
+        roll: enemy.roll,
+        speed: getShipSpeed(enemy),
+        drift: getShipDrift(enemy),
         throttle: enemy.throttle
       };
       previousSnapshot.enemies.set(enemy.id, target);
@@ -162,11 +188,12 @@ const capturePreviousSnapshot = (): void => {
     if (!target) {
       target = {
         x: projectile.position.x,
+        y: projectile.position.y,
         z: projectile.position.z
       };
       previousSnapshot.projectiles.set(projectile.id, target);
     } else {
-      copyPositionSnapshot(target, projectile.position.x, projectile.position.z);
+      copyPositionSnapshot(target, projectile.position.x, projectile.position.y, projectile.position.z);
     }
     snapshotSeenIds.projectiles.add(projectile.id);
   }
@@ -185,11 +212,12 @@ const capturePreviousSnapshot = (): void => {
     if (!target) {
       target = {
         x: loot.position.x,
+        y: loot.position.y,
         z: loot.position.z
       };
       previousSnapshot.loot.set(loot.id, target);
     } else {
-      copyPositionSnapshot(target, loot.position.x, loot.position.z);
+      copyPositionSnapshot(target, loot.position.x, loot.position.y, loot.position.z);
     }
     snapshotSeenIds.loot.add(loot.id);
   }
@@ -213,7 +241,7 @@ const countAliveEnemies = (): number => {
 capturePreviousSnapshot();
 
 const loop = createLoop({
-  fixedStep: FIXED_TIME_STEP,
+  fixedStep: selectedFixedStep,
   maxFrameDelta: MAX_FRAME_DT,
   beforeFixedUpdate: capturePreviousSnapshot,
   update: (dt) => {

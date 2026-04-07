@@ -1,4 +1,5 @@
 import type { WaterTuningControls, WaterWaveComponent } from "./waterConfig";
+import { sampleWaterHeight } from "../../physics/waterSurface";
 
 interface Vec2 {
   x: number;
@@ -51,17 +52,7 @@ export function sampleWaveHeightAtPoint(
   time: number,
   tuning: Pick<WaterTuningControls, "waveAmplitude" | "wavelength" | "waveSpeed">
 ): number {
-  let height = 0;
-  for (const component of components) {
-    const direction = normalizeDirection(component.direction);
-    const wavelength = Math.max(1e-3, component.wavelength * tuning.wavelength);
-    const amplitude = component.amplitude * tuning.waveAmplitude;
-    const speed = component.speed * tuning.waveSpeed;
-    const waveNumber = (Math.PI * 2) / wavelength;
-    const phase = waveNumber * (direction[0] * point.x + direction[1] * point.z) + time * speed + component.phaseOffset;
-    height += Math.sin(phase) * amplitude;
-  }
-  return height;
+  return sampleWaterHeight(components, point, time, tuning);
 }
 
 export interface ShorelineIsland {

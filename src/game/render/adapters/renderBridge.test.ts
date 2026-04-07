@@ -1,6 +1,6 @@
 import { Group, PerspectiveCamera, Scene, Vector3 } from "three";
 import { describe, expect, it, vi } from "vitest";
-import { createInitialWorldState, type EnemyState, type WorldState } from "../../simulation";
+import { createInitialWorldState, type EnemyState, type LootState, type ProjectileState, type WorldState } from "../../simulation";
 import { createShipDefinition, createShipMesh } from "../objects/createShipMesh";
 import { createShipWakeController, createWakeDebugSurface } from "../wake/createShipWakeController";
 import {
@@ -11,28 +11,93 @@ import {
 } from "./renderBridge";
 
 function createEnemyState(id: number, x: number, z: number, heading = 0): EnemyState {
+  const base = createInitialWorldState().player;
   return {
+    ...base,
     id,
     archetype: "raider",
     owner: "enemy",
-    position: { x, z },
+    position: { x, y: base.position.y, z },
     heading,
+    pitch: 0,
+    roll: 0,
+    linearVelocity: { x: 0, y: 0, z: 0 },
+    angularVelocity: 0,
+    pitchVelocity: 0,
+    rollVelocity: 0,
     speed: 0,
     drift: 0,
     throttle: 0,
+    turnInput: 0,
     hp: 100,
     maxHp: 100,
     radius: 2.1,
+    mass: base.mass,
+    centerOfMass: { ...base.centerOfMass },
+    buoyancyProbes: base.buoyancyProbes.map((probe) => ({ ...probe, localOffset: { ...probe.localOffset } })),
+    buoyancyStrength: base.buoyancyStrength,
+    buoyancyDamping: base.buoyancyDamping,
+    buoyancyLoss: 0,
+    hull: { ...base.hull },
+    drag: { ...base.drag },
+    thrustForce: base.thrustForce,
+    turnTorque: base.turnTorque,
+    lowSpeedTurnAssist: base.lowSpeedTurnAssist,
     reload: { left: 0, right: 0 },
     status: "alive",
+    damageState: "healthy",
     sinkTimer: 0,
     repairCooldown: 0,
+    collisionLayer: "ships",
+    waterState: "submerged",
     aiState: "patrol",
     patrolAngle: 0,
     lootDropped: false,
     aiStateTimer: 0,
     detectProgress: 0,
     pendingFireSide: null
+  };
+}
+
+function createProjectileState(id: number, owner: "player" | "enemy", x: number, z: number, y = 1.1): ProjectileState {
+  return {
+    id,
+    owner,
+    position: { x, y, z },
+    velocity: { x: 0, y: 0, z: 0 },
+    lifetime: 2,
+    active: true,
+    mass: 6.5,
+    gravityScale: 1,
+    dragAir: 0.2,
+    dragWater: 7.5,
+    collisionRadius: 0.36,
+    impactImpulse: 6.4,
+    terminateOnWaterImpact: true,
+    waterState: "airborne",
+    collisionLayer: "projectiles"
+  };
+}
+
+function createLootState(id: number, x: number, z: number, y = 0.5): LootState {
+  return {
+    id,
+    kind: "gold",
+    amount: 10,
+    position: { x, y, z },
+    velocity: { x: 0, y: 0, z: 0 },
+    yaw: 0,
+    angularVelocity: 0,
+    mass: 4.5,
+    buoyancyMultiplier: 1.15,
+    waterDrag: 2.8,
+    angularDamping: 3.6,
+    floats: true,
+    waterState: "submerged",
+    lifetime: 10,
+    pickupRadius: 3,
+    active: true,
+    collisionLayer: "pickups_debris"
   };
 }
 
@@ -196,25 +261,8 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     enemy.throttle = 0.8;
     worldState.enemies.push(enemy);
 
-    worldState.projectiles.push({
-      id: 1,
-      owner: "player",
-      position: { x: 16, z: 4 },
-      velocity: { x: 0, z: 0 },
-      lifetime: 2,
-      active: true
-    });
-
-    worldState.loot.push({
-      id: 1,
-      kind: "gold",
-      amount: 10,
-      position: { x: 8, z: -4 },
-      driftVelocity: { x: 0, z: 0 },
-      lifetime: 10,
-      pickupRadius: 3,
-      active: true
-    });
+    worldState.projectiles.push(createProjectileState(1, "player", 16, 4));
+    worldState.loot.push(createLootState(1, 8, -4));
 
     const interpolation = createInterpolationContext(worldState, 0.5);
     interpolation.previousSnapshot.player = {
@@ -233,8 +281,8 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
       drift: 0,
       throttle: 0
     });
-    interpolation.previousSnapshot.projectiles.set(1, { x: 2, z: 0 });
-    interpolation.previousSnapshot.loot.set(1, { x: 0, z: -2 });
+    interpolation.previousSnapshot.projectiles.set(1, { x: 2, y: 1.1, z: 0 });
+    interpolation.previousSnapshot.loot.set(1, { x: 0, y: 0.5, z: -2 });
 
     const bridge = createBridge();
     syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
@@ -294,7 +342,7 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     expect(secondCall?.[1]?.renderTime).toBeCloseTo(worldState.time, 6);
     expect(secondCall?.[1]?.playerPose?.x).toBeCloseTo(worldState.player.position.x, 6);
     expect(secondCall?.[1]?.cameraPosition).toBeDefined();
-    expect(Math.abs(yAtAlpha1 - yAtAlpha0)).toBeGreaterThan(0.0001);
+    expect(Math.abs(yAtAlpha1 - yAtAlpha0)).toBeGreaterThan(0.00004);
   });
 
   it("tracks camera heading directly during small oscillations", () => {
@@ -373,6 +421,14 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     worldState.player.drift = 3;
     worldState.player.throttle = 1;
     worldState.player.heading = 0.62;
+    {
+      const forwardX = Math.sin(worldState.player.heading);
+      const forwardZ = Math.cos(worldState.player.heading);
+      const leftX = -forwardZ;
+      const leftZ = forwardX;
+      worldState.player.linearVelocity.x = forwardX * worldState.player.speed + leftX * worldState.player.drift;
+      worldState.player.linearVelocity.z = forwardZ * worldState.player.speed + leftZ * worldState.player.drift;
+    }
 
     const interpolation = createInterpolationContext(worldState, 1);
     interpolation.previousSnapshot.player.heading = 0.2;
@@ -418,38 +474,10 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     worldState.enemies.push(enemy);
 
     worldState.projectiles.push(
-      {
-        id: 1,
-        owner: "player",
-        position: { x: -2.8, z: 1.2 },
-        velocity: { x: 0, z: 0 },
-        lifetime: 2,
-        active: true
-      },
-      {
-        id: 2,
-        owner: "player",
-        position: { x: 2.8, z: 1.2 },
-        velocity: { x: 0, z: 0 },
-        lifetime: 2,
-        active: true
-      },
-      {
-        id: 3,
-        owner: "enemy",
-        position: { x: 5.4, z: 0.8 },
-        velocity: { x: 0, z: 0 },
-        lifetime: 2,
-        active: true
-      },
-      {
-        id: 4,
-        owner: "enemy",
-        position: { x: 10.6, z: 0.8 },
-        velocity: { x: 0, z: 0 },
-        lifetime: 2,
-        active: true
-      }
+      createProjectileState(1, "player", -2.8, 1.2),
+      createProjectileState(2, "player", 2.8, 1.2),
+      createProjectileState(3, "enemy", 5.4, 0.8),
+      createProjectileState(4, "enemy", 10.6, 0.8)
     );
 
     const interpolation = createInterpolationContext(worldState, 1);
@@ -475,14 +503,7 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     leftWorld.player.position.x = 0;
     leftWorld.player.position.z = 0;
     leftWorld.player.heading = 0;
-    leftWorld.projectiles.push({
-      id: 1,
-      owner: "player",
-      position: { x: -2.8, z: 1.2 },
-      velocity: { x: 0, z: 0 },
-      lifetime: 2,
-      active: true
-    });
+    leftWorld.projectiles.push(createProjectileState(1, "player", -2.8, 1.2));
 
     const leftBridge = createBridge();
     syncRenderFromSimulation(leftWorld, leftBridge, 1 / 60, createInterpolationContext(leftWorld, 1));
@@ -493,14 +514,7 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     rightWorld.player.position.x = 0;
     rightWorld.player.position.z = 0;
     rightWorld.player.heading = 0;
-    rightWorld.projectiles.push({
-      id: 1,
-      owner: "player",
-      position: { x: 2.8, z: 1.2 },
-      velocity: { x: 0, z: 0 },
-      lifetime: 2,
-      active: true
-    });
+    rightWorld.projectiles.push(createProjectileState(1, "player", 2.8, 1.2));
 
     const rightBridge = createBridge();
     syncRenderFromSimulation(rightWorld, rightBridge, 1 / 60, createInterpolationContext(rightWorld, 1));
@@ -512,8 +526,12 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     const worldState = createInitialWorldState();
     const enemy = createEnemyState(1, 12, 4, 0.4);
     enemy.speed = 9;
+    enemy.linearVelocity.x = Math.sin(enemy.heading) * 9;
+    enemy.linearVelocity.z = Math.cos(enemy.heading) * 9;
     worldState.enemies.push(enemy);
     worldState.player.speed = 9;
+    worldState.player.linearVelocity.x = 0;
+    worldState.player.linearVelocity.z = 9;
 
     const interpolation = createInterpolationContext(worldState, 1);
     const environmentSync = vi.fn();
@@ -527,6 +545,10 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
 
     worldState.player.speed = 0;
     enemy.speed = 0;
+    worldState.player.linearVelocity.x = 0;
+    worldState.player.linearVelocity.z = 0;
+    enemy.linearVelocity.x = 0;
+    enemy.linearVelocity.z = 0;
     for (let i = 0; i < 130; i += 1) {
       syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
     }

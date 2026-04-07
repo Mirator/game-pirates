@@ -2,7 +2,8 @@
 
 Phase 2 browser prototype for the pirate game design:
 - stylized sea map with port marker and enemy spawns
-- player ship movement, follow camera, and broadside cannon combat
+- gravity-based ship buoyancy physics, follow camera, and broadside cannon combat
+- ballistic cannonballs and floating loot object water interaction
 - enemy spawn director (up to 2 active raiders with staggered pressure)
 - loot drops (gold, cargo, repair materials, and treasure maps)
 - dock interaction + upgrade menu (Hull Reinforcement)
@@ -30,3 +31,6 @@ Phase 2 browser prototype for the pirate game design:
 
 For custom caps you can set `E2E_WORKERS`, for example:
 - PowerShell: `$env:E2E_WORKERS=2; npm run test:e2e`
+
+Optional physics tick fallback:
+- set `VITE_PHYSICS_TICK_HZ=30` to run simulation at 30 Hz fixed step.

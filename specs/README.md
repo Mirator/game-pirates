@@ -16,9 +16,12 @@ to one or more spec files.
 - [08 Stylized Ocean, Lighting, and Atmospheric Rendering Upgrade](08-stylized-ocean-rendering.md)
 - [09 Ship Visual and Gameplay Representation Upgrade](09-ship-visual-and-gameplay-representation-upgrade.md)
 - [10 Stylized Ship Wake Rendering System](10-ship-wake-rendering-system.md)
+- [11 Gravity-Based Physics System](11-gravity-based-physics-system.md)
 
 ## How To Use
 
 - Start each implementation task by naming the spec file and section.
 - Keep acceptance criteria concrete and testable.
 - Treat this folder as the source of truth over older notes.
+- Treat Spec 11 as the canonical gameplay-physics authority for gravity, buoyancy,
+  projectile ballistics, and collision force behavior.

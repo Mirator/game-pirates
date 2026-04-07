@@ -3,6 +3,10 @@ export { closePortMenu, drainSimulationEvents, tryPurchaseHullUpgrade, trySellCa
 export * from "./constants";
 export type {
   CannonSide,
+  CollisionLayer,
+  CollisionHullState,
+  DragCoefficientsState,
+  BuoyancyProbeState,
   BurstState,
   EnemyArchetype,
   EnemyAiState,
@@ -18,12 +22,16 @@ export type {
   ProjectileState,
   SimulationEvent,
   ShipOwner,
+  ShipDamageState,
   ShipState,
   SpawnDirectorState,
   StormState,
   TreasureObjectiveState,
   UpgradeState,
   WalletState,
+  WaterContactState,
+  Vector2State,
+  Vector3State,
   WorldEventKind,
   WorldState
 } from "./types";

@@ -1,77 +1,73 @@
-﻿# Spec 03: Sailing and Combat
+# Spec 03: Sailing and Combat
 
 ## Purpose
 
-Define core ship handling and combat rules for the first playable game.
+Define player-facing handling and combat rules using the gravity-based physics
+model from Spec 11.
+
+Cross-spec dependency:
+
+- Spec 11 is the canonical authority for simulation-side force/buoyancy/collision
+  behavior.
 
 ## Controls
 
-- W or S: accelerate or decelerate.
-- A or D: turn left or right.
+- W or S: forward/reverse thrust input.
+- A or D: turn torque input.
 - Q or E: fire left or right broadside.
 - R: repair ship.
 - Space: interact, dock, or collect nearby loot.
-- Shift: temporary speed burst (1.35x speed cap, 1.2s active, 4.0s cooldown).
+- Shift: temporary burst.
 
 ## Sailing Model
 
-Arcade-first handling requirements:
-- Clear forward momentum.
-- Wide turning circle.
-- Light drift while turning.
-- Waves primarily visual, not heavy physics simulation.
-- Optional light wind modifier.
+Physics-first handling requirements:
+
+- Ship motion is force-driven with inertia.
+- Turning is torque-driven and should produce arc motion.
+- Buoyancy probes generate bob, pitch, and roll response.
+- Water drag and damping stabilize motion and prevent perpetual oscillation.
+- Player control remains responsive despite inertia.
 
 ### Motion Smoothness Requirements
 
-- Sailing and turning must not exhibit visible freeze-jump stepping ("earthquake"
-  jitter) on common 60 Hz to 165 Hz displays.
-- Visual ship, projectile, and loot motion should remain continuous between
-  simulation ticks through render interpolation.
-- Wave and buoyancy visual motion should advance on render-time, not only
-  fixed simulation ticks.
+- Gameplay simulation runs on fixed timestep.
+- Render interpolation smooths between fixed snapshots.
+- Ship/projectile/loot visuals must not stutter under variable framerate.
 
 ### Camera Stability Requirements
 
-- Camera follow should prioritize combat readability over cinematic whip.
-- Rapid heading micro-oscillation from steering should be damped so the camera
-  does not jitter frame-to-frame.
-- Speed-based camera offsets may exist, but should be restrained to avoid
-  disorienting swings at high speed.
+- Camera follow prioritizes readability over aggressive cinematic behavior.
+- Heading jitter from steering must not create frame-to-frame camera shake.
+- Speed-based camera offsets remain bounded.
 
 ### World Boundary Behavior
 
-- The playable sea is bounded by a circular world radius.
-- Player ship uses a soft bounce at the boundary:
-  clamp position to the boundary, reflect heading only when moving outward,
-  and damp speed and drift.
-- Enemy ships may keep a simpler inward correction to preserve AI stability.
-
-Reasoning: realistic sailing simulation is high complexity and low leverage for
-MVP fun.
+- Playable sea is bounded by circular world radius.
+- Player boundary interaction uses soft physical correction with momentum damping.
+- Enemy ships may use stricter inward correction for AI stability.
 
 ## Combat Rules
 
-- Cannons are split by left and right side.
-- Each side has an independent reload timer.
-- Cannonballs are visible projectiles.
-- Enemy hits damage hull HP.
-- Ships sink at zero HP and drop loot.
+- Cannons are split by left and right side with independent reload timers.
+- Cannonballs are ballistic projectiles with visible arcs.
+- Hits damage hull HP and may apply impulse feedback.
+- Ships sink at zero HP and transition through sinking physics.
 
-## Combat Depth For MVP
+## Combat Depth for MVP
 
-- Positioning matters.
-- Broadside angle matters.
+- Positioning and broadside angle matter.
 - Reload timing matters.
-- Range affects hit reliability.
+- Range affects impact reliability due to ballistic drop.
 
 ## Damage Model
 
-MVP:
-- Hull HP only.
+Core states:
 
-Future optional extensions:
-- Sail damage.
-- Crew damage.
-- Special ammo.
-- Critical hit zones.
+- healthy
+- damaged
+- critical
+- sunk
+
+MVP still uses hull HP as the main health resource, with sinking and buoyancy
+loss handled by the physics system.

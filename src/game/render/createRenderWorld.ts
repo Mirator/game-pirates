@@ -137,8 +137,11 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
     cameraLookInitialized: false,
     playerPoseScratch: {
       x: 0,
+      y: 0,
       z: 0,
       heading: 0,
+      pitch: 0,
+      roll: 0,
       speed: 0,
       drift: 0,
       throttle: 0,
@@ -146,8 +149,11 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
     },
     enemyPoseScratch: {
       x: 0,
+      y: 0,
       z: 0,
       heading: 0,
+      pitch: 0,
+      roll: 0,
       speed: 0,
       drift: 0,
       throttle: 0,
