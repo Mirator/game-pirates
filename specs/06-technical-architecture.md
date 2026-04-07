@@ -42,6 +42,12 @@ Even in singleplayer, organize systems as if networking will be added later.
   rather than snapping directly to latest fixed-step state.
 - Heading interpolation must use shortest-angle blending across `-pi`/`pi`
   boundaries to avoid rotation flips.
+- Keep scene-atmosphere ownership in the environment render subsystem:
+  lighting, sky, fog, and related visual tuning must remain render-only.
+- Keep renderer exposure and atmosphere state synchronized at render time so
+  visual mood responds without affecting gameplay authority.
+- Expose render debug controls only as non-authoritative tuning interfaces
+  (for example `__BLACKWAKE_DEBUG__`), never as simulation truth.
 
 ## Render Interpolation Contract
 

@@ -1,23 +1,39 @@
 import {
+  BackSide,
   CircleGeometry,
   Color,
   ConeGeometry,
   CylinderGeometry,
+  DirectionalLight,
   DoubleSide,
-  Fog,
+  FogExp2,
   Group,
+  HemisphereLight,
   Material,
+  MathUtils,
   Mesh,
   MeshStandardMaterial,
+  OrthographicCamera,
   PlaneGeometry,
   Scene,
   ShaderMaterial,
+  SphereGeometry,
   TorusGeometry,
   Vector2,
   Vector3,
   Vector4
 } from "three";
 import { PLAYER_MAX_FORWARD_SPEED, type IslandKind, type IslandState, type WorldState } from "../../simulation";
+import {
+  createAtmosphereTuningFromPreset,
+  createDefaultAtmosphereConfig,
+  getAtmospherePreset,
+  sanitizeAtmosphereTuning,
+  type AtmosphereDebugSnapshot,
+  type AtmospherePresetId,
+  type AtmosphereRenderConfig,
+  type AtmosphereTuningControls
+} from "../atmosphere/atmosphereConfig";
 import { createWaterNormalTexture } from "../water/createWaterNormalTexture";
 import { buildWaveShaderUniformState, computeWakeIntensity } from "../water/waterMath";
 import {
@@ -59,10 +75,38 @@ export interface EnvironmentObjects {
     setQuality: (quality: WaterQualityLevel) => void;
     updateTuning: (patch: Partial<WaterTuningControls>) => void;
   };
+  lighting: {
+    getConfig: () => AtmosphereDebugSnapshot;
+    setPreset: (preset: AtmospherePresetId) => void;
+    updateTuning: (patch: Partial<AtmosphereTuningControls>) => void;
+    getCurrentExposure: () => number;
+  };
+}
+
+interface SkyUniformState {
+  [key: string]: { value: unknown };
+  uTopColor: { value: Color };
+  uHorizonColor: { value: Color };
+  uBottomColor: { value: Color };
+  uSunColor: { value: Color };
+  uSunDirection: { value: Vector3 };
+  uSunStrength: { value: number };
 }
 
 function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
+}
+
+function lerp(from: number, to: number, alpha: number): number {
+  return from + (to - from) * alpha;
+}
+
+function createSunDirection(azimuthDeg: number, elevationDeg: number, target: Vector3): Vector3 {
+  const azimuth = MathUtils.degToRad(azimuthDeg);
+  const elevation = MathUtils.degToRad(elevationDeg);
+  const cosElevation = Math.cos(elevation);
+  target.set(Math.sin(azimuth) * cosElevation, Math.sin(elevation), Math.cos(azimuth) * cosElevation);
+  return target.normalize();
 }
 
 function disposeGroup(group: Group): void {
@@ -80,6 +124,12 @@ function disposeGroup(group: Group): void {
       (mesh.material as Material).dispose();
     }
   });
+}
+
+function enableShadows(mesh: Mesh, castShadow = true, receiveShadow = true): Mesh {
+  mesh.castShadow = castShadow;
+  mesh.receiveShadow = receiveShadow;
+  return mesh;
 }
 
 function getIslandPalette(kind: IslandKind): {
@@ -105,26 +155,30 @@ function createIslandMesh(island: IslandState): Group {
 
   const group = new Group();
 
-  const sand = new Mesh(
-    new CircleGeometry(island.radius * 1.02, 20),
-    new MeshStandardMaterial({
-      color: palette.sand,
-      flatShading: true,
-      roughness: 0.9,
-      side: DoubleSide
-    })
+  const sand = enableShadows(
+    new Mesh(
+      new CircleGeometry(island.radius * 1.02, 20),
+      new MeshStandardMaterial({
+        color: palette.sand,
+        flatShading: true,
+        roughness: 0.9,
+        side: DoubleSide
+      })
+    )
   );
   sand.rotation.x = -Math.PI * 0.5;
   sand.position.y = 0.05;
   group.add(sand);
 
-  const rock = new Mesh(
-    new ConeGeometry(4.8 * scale, 3.2 * scale, 8),
-    new MeshStandardMaterial({
-      color: palette.rock,
-      flatShading: true,
-      roughness: 0.95
-    })
+  const rock = enableShadows(
+    new Mesh(
+      new ConeGeometry(4.8 * scale, 3.2 * scale, 8),
+      new MeshStandardMaterial({
+        color: palette.rock,
+        flatShading: true,
+        roughness: 0.95
+      })
+    )
   );
   rock.rotation.y = Math.PI * 0.16;
   rock.position.y = 1.48 * scale;
@@ -132,29 +186,33 @@ function createIslandMesh(island: IslandState): Group {
 
   const markerHeight = island.kind === "port" ? 4.2 : 3.2;
   const markerRadius = island.kind === "hostile" ? 0.68 : 0.48;
-  const marker = new Mesh(
-    new ConeGeometry(markerRadius * scale, markerHeight * scale, 6),
-    new MeshStandardMaterial({
-      color: palette.accent,
-      emissive: palette.accent,
-      emissiveIntensity: island.kind === "hostile" ? 0.08 : 0.13,
-      flatShading: true,
-      roughness: 0.55
-    })
+  const marker = enableShadows(
+    new Mesh(
+      new ConeGeometry(markerRadius * scale, markerHeight * scale, 6),
+      new MeshStandardMaterial({
+        color: palette.accent,
+        emissive: palette.accent,
+        emissiveIntensity: island.kind === "hostile" ? 0.08 : 0.13,
+        flatShading: true,
+        roughness: 0.55
+      })
+    )
   );
   marker.position.y = 2.4 * scale;
   marker.rotation.y = island.id * 0.6;
   group.add(marker);
 
   if (island.kind === "port") {
-    const lantern = new Mesh(
-      new CylinderGeometry(0.2, 0.2, 1.3, 6),
-      new MeshStandardMaterial({
-        color: "#ffecbe",
-        emissive: "#f1c369",
-        emissiveIntensity: 0.28,
-        roughness: 0.3
-      })
+    const lantern = enableShadows(
+      new Mesh(
+        new CylinderGeometry(0.2, 0.2, 1.3, 6),
+        new MeshStandardMaterial({
+          color: "#ffecbe",
+          emissive: "#f1c369",
+          emissiveIntensity: 0.28,
+          roughness: 0.3
+        })
+      )
     );
     lantern.position.y = 4.4 * scale;
     group.add(lantern);
@@ -348,7 +406,76 @@ void main() {
 }
 `;
 
-export function createEnvironment(scene: Scene, configuredWater: WaterRenderConfig = createDefaultWaterConfig()): EnvironmentObjects {
+const SKY_VERTEX_SHADER = `
+varying vec3 vDirection;
+
+void main() {
+  vDirection = normalize(position);
+  vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
+  gl_Position = projectionMatrix * mvPosition;
+}
+`;
+
+const SKY_FRAGMENT_SHADER = `
+uniform vec3 uTopColor;
+uniform vec3 uHorizonColor;
+uniform vec3 uBottomColor;
+uniform vec3 uSunColor;
+uniform vec3 uSunDirection;
+uniform float uSunStrength;
+
+varying vec3 vDirection;
+
+void main() {
+  vec3 direction = normalize(vDirection);
+  float t = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
+
+  vec3 color = mix(uBottomColor, uHorizonColor, smoothstep(0.1, 0.56, t));
+  color = mix(color, uTopColor, smoothstep(0.5, 1.0, t));
+
+  float sunMask = pow(max(dot(direction, normalize(uSunDirection)), 0.0), 180.0);
+  color += uSunColor * sunMask * uSunStrength;
+
+  gl_FragColor = vec4(color, 1.0);
+  #include <tonemapping_fragment>
+  #include <colorspace_fragment>
+}
+`;
+
+function applyAtmosphereToSky(
+  skyUniforms: SkyUniformState,
+  basePresetId: AtmospherePresetId,
+  stormBlend: number,
+  workingA: Color,
+  workingB: Color
+): void {
+  const basePreset = getAtmospherePreset(basePresetId);
+  const stormPreset = getAtmospherePreset("storm");
+
+  workingA.set(basePreset.skyTopColor);
+  workingB.set(stormPreset.skyTopColor);
+  skyUniforms.uTopColor.value.copy(workingA.lerp(workingB, stormBlend));
+
+  workingA.set(basePreset.skyHorizonColor);
+  workingB.set(stormPreset.skyHorizonColor);
+  skyUniforms.uHorizonColor.value.copy(workingA.lerp(workingB, stormBlend));
+
+  workingA.set(basePreset.skyBottomColor);
+  workingB.set(stormPreset.skyBottomColor);
+  skyUniforms.uBottomColor.value.copy(workingA.lerp(workingB, stormBlend));
+
+  workingA.set(basePreset.skySunColor);
+  workingB.set(stormPreset.skySunColor);
+  skyUniforms.uSunColor.value.copy(workingA.lerp(workingB, stormBlend));
+
+  skyUniforms.uSunStrength.value = lerp(basePreset.skySunStrength, stormPreset.skySunStrength, stormBlend);
+}
+
+export function createEnvironment(
+  scene: Scene,
+  configuredWater: WaterRenderConfig = createDefaultWaterConfig(),
+  configuredAtmosphere: AtmosphereRenderConfig = createDefaultAtmosphereConfig()
+): EnvironmentObjects {
   const root = new Group();
   scene.add(root);
 
@@ -359,12 +486,64 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
   };
   let waterPreset = getWaterQualityPreset(waterConfig.quality);
 
-  const calmFogColor = new Color("#8fd4ff");
-  const stormFogColor = new Color("#6a8599");
-  const calmBackground = new Color("#8fd4ff");
-  const stormBackground = new Color("#6c8aa0");
+  const defaultAtmosphere = createDefaultAtmosphereConfig();
+  const initialAtmospherePreset = configuredAtmosphere.preset ?? defaultAtmosphere.preset;
+  let atmosphereConfig: AtmosphereRenderConfig = {
+    preset: initialAtmospherePreset,
+    tuning: sanitizeAtmosphereTuning(
+      configuredAtmosphere.tuning,
+      createAtmosphereTuningFromPreset(initialAtmospherePreset)
+    )
+  };
+
+  scene.background = null;
+  const fog = new FogExp2(new Color(atmosphereConfig.tuning.fogColor), atmosphereConfig.tuning.fogDensity);
+  scene.fog = fog;
+
+  const sun = new DirectionalLight("#ffe3b3", atmosphereConfig.tuning.sunIntensity);
+  sun.castShadow = true;
+  sun.shadow.radius = 2;
+  scene.add(sun);
+  scene.add(sun.target);
+
+  const hemisphere = new HemisphereLight("#d6f0ff", "#3a6176", atmosphereConfig.tuning.ambientIntensity);
+  hemisphere.position.set(0, 25, 0);
+  scene.add(hemisphere);
+
+  const skyUniforms: SkyUniformState = {
+    uTopColor: { value: new Color("#74b9eb") },
+    uHorizonColor: { value: new Color("#a8dbff") },
+    uBottomColor: { value: new Color("#d8ecfb") },
+    uSunColor: { value: new Color("#ffe4ac") },
+    uSunDirection: { value: new Vector3(0.3, 0.8, 0.4).normalize() },
+    uSunStrength: { value: 0.24 }
+  };
+
+  const sky = new Mesh(
+    new SphereGeometry(420, 28, 20),
+    new ShaderMaterial({
+      uniforms: skyUniforms,
+      vertexShader: SKY_VERTEX_SHADER,
+      fragmentShader: SKY_FRAGMENT_SHADER,
+      side: BackSide,
+      depthWrite: false,
+      fog: false
+    })
+  );
+  sky.frustumCulled = false;
+  scene.add(sky);
+
   const stormWaterColor = new Color("#264f6b");
-  const workingColor = new Color();
+  const workingColorA = new Color();
+  const workingColorB = new Color();
+  const baseSunDirection = new Vector3();
+  const stormSunDirection = new Vector3();
+  const effectiveSunDirection = new Vector3();
+  const shadowTarget = new Vector3();
+  const lastCameraPosition = new Vector3(0, 6, -12);
+  const lastPlayerPosition = new Vector3(0, 0, 0);
+  let activeStormBlend = 0;
+  let currentExposure = atmosphereConfig.tuning.exposure;
 
   const waveDirections = Array.from({ length: WATER_MAX_WAVE_COMPONENTS }, () => new Vector2(1, 0));
   const islandData = Array.from({ length: WATER_MAX_ISLANDS }, () => new Vector4(0, 0, 0, 0));
@@ -410,10 +589,10 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
     uIslandCount: { value: 0 },
     uIslandData: { value: islandData },
     uShorelineStrength: { value: 1 },
-    fogColor: { value: calmFogColor.clone() },
+    fogColor: { value: new Color(atmosphereConfig.tuning.fogColor) },
     fogNear: { value: 70 },
     fogFar: { value: 190 },
-    fogDensity: { value: 0.00025 }
+    fogDensity: { value: atmosphereConfig.tuning.fogDensity }
   };
 
   const waterMaterial = new ShaderMaterial({
@@ -424,6 +603,8 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
   });
   const water = new Mesh(createWaterGeometry(waterPreset.geometrySegments), waterMaterial);
   water.position.y = 0;
+  water.castShadow = false;
+  water.receiveShadow = false;
   root.add(water);
 
   const applyWaterConfig = (rebuildGeometry: boolean): void => {
@@ -490,7 +671,70 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
     }
   };
 
+  const applyLightingState = (): void => {
+    const basePreset = getAtmospherePreset(atmosphereConfig.preset);
+    const stormPreset = getAtmospherePreset("storm");
+    const stormBlend = atmosphereConfig.preset === "storm" ? 0 : activeStormBlend;
+
+    createSunDirection(atmosphereConfig.tuning.sunAzimuthDeg, atmosphereConfig.tuning.sunElevationDeg, baseSunDirection);
+    createSunDirection(stormPreset.sunAzimuthDeg, stormPreset.sunElevationDeg, stormSunDirection);
+    effectiveSunDirection.copy(baseSunDirection).lerp(stormSunDirection, stormBlend).normalize();
+
+    const effectiveSunIntensity = lerp(atmosphereConfig.tuning.sunIntensity, stormPreset.sunIntensity, stormBlend);
+    const effectiveAmbientIntensity = lerp(atmosphereConfig.tuning.ambientIntensity, stormPreset.ambientIntensity, stormBlend);
+    const effectiveFogDensity = lerp(atmosphereConfig.tuning.fogDensity, stormPreset.fogDensity, stormBlend);
+    const effectiveShadowBounds = atmosphereConfig.tuning.shadowCameraBounds;
+    const effectiveShadowResolution = atmosphereConfig.tuning.shadowMapResolution;
+
+    currentExposure = lerp(atmosphereConfig.tuning.exposure, stormPreset.exposure, stormBlend);
+
+    workingColorA.set(basePreset.sunColor);
+    workingColorB.set(stormPreset.sunColor);
+    sun.color.copy(workingColorA.lerp(workingColorB, stormBlend));
+    sun.intensity = effectiveSunIntensity;
+
+    workingColorA.set(basePreset.ambientSkyColor);
+    workingColorB.set(stormPreset.ambientSkyColor);
+    hemisphere.color.copy(workingColorA.lerp(workingColorB, stormBlend));
+    workingColorA.set(basePreset.ambientGroundColor);
+    workingColorB.set(stormPreset.ambientGroundColor);
+    hemisphere.groundColor.copy(workingColorA.lerp(workingColorB, stormBlend));
+    hemisphere.intensity = effectiveAmbientIntensity;
+
+    workingColorA.set(atmosphereConfig.tuning.fogColor);
+    workingColorB.set(stormPreset.fogColor);
+    fog.color.copy(workingColorA.lerp(workingColorB, stormBlend));
+    fog.density = effectiveFogDensity;
+
+    applyAtmosphereToSky(skyUniforms, atmosphereConfig.preset, stormBlend, workingColorA, workingColorB);
+    skyUniforms.uSunDirection.value.copy(effectiveSunDirection);
+
+    sun.shadow.mapSize.set(effectiveShadowResolution, effectiveShadowResolution);
+    const shadowCamera = sun.shadow.camera as OrthographicCamera;
+    shadowCamera.left = -effectiveShadowBounds;
+    shadowCamera.right = effectiveShadowBounds;
+    shadowCamera.top = effectiveShadowBounds;
+    shadowCamera.bottom = -effectiveShadowBounds;
+    shadowCamera.near = 6;
+    shadowCamera.far = Math.max(120, effectiveShadowBounds * 3.1);
+    shadowCamera.updateProjectionMatrix();
+
+    sun.shadow.bias = lerp(basePreset.shadowBias, stormPreset.shadowBias, stormBlend);
+    sun.shadow.normalBias = lerp(basePreset.shadowNormalBias, stormPreset.shadowNormalBias, stormBlend);
+
+    shadowTarget.set(lastPlayerPosition.x, 0, lastPlayerPosition.z);
+    sun.target.position.copy(shadowTarget);
+    sun.position.copy(effectiveSunDirection).multiplyScalar(effectiveShadowBounds * 1.25).add(shadowTarget);
+    sun.target.updateMatrixWorld();
+
+    sky.position.copy(lastCameraPosition);
+    waterUniforms.uSunDirection.value.copy(effectiveSunDirection);
+    waterUniforms.fogColor.value.copy(fog.color);
+    waterUniforms.fogDensity.value = fog.density;
+  };
+
   applyWaterConfig(false);
+  applyLightingState();
 
   const islandsRoot = new Group();
   root.add(islandsRoot);
@@ -512,10 +756,14 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
     roughness: 0.22
   });
   const treasureBeacon = new Group();
-  const treasureBeam = new Mesh(new CylinderGeometry(0.36, 0.66, 15, 10, 1, true), treasureBeamMaterial);
+  const treasureBeam = enableShadows(
+    new Mesh(new CylinderGeometry(0.36, 0.66, 15, 10, 1, true), treasureBeamMaterial),
+    false,
+    false
+  );
   treasureBeam.position.y = 7.5;
   treasureBeacon.add(treasureBeam);
-  const treasureRing = new Mesh(new TorusGeometry(2.4, 0.18, 8, 22), treasureRingMaterial);
+  const treasureRing = enableShadows(new Mesh(new TorusGeometry(2.4, 0.18, 8, 22), treasureRingMaterial));
   treasureRing.rotation.x = Math.PI * 0.5;
   treasureRing.position.y = 0.22;
   treasureBeacon.add(treasureRing);
@@ -543,29 +791,33 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
   });
 
   const stormGroup = new Group();
-  const stormDisk = new Mesh(new CircleGeometry(1, 42), stormDiskMaterial);
+  const stormDisk = enableShadows(new Mesh(new CircleGeometry(1, 42), stormDiskMaterial), false, false);
   stormDisk.rotation.x = -Math.PI * 0.5;
   stormDisk.position.y = 0.14;
   stormGroup.add(stormDisk);
 
-  const stormRim = new Mesh(new TorusGeometry(1, 0.03, 8, 48), stormRimMaterial);
+  const stormRim = enableShadows(new Mesh(new TorusGeometry(1, 0.03, 8, 48), stormRimMaterial), false, false);
   stormRim.rotation.x = Math.PI * 0.5;
   stormRim.position.y = 0.2;
   stormGroup.add(stormRim);
 
   const stormClouds = new Group();
   for (let i = 0; i < 12; i += 1) {
-    const cloud = new Mesh(
-      new ConeGeometry(0.12, 0.28, 5),
-      new MeshStandardMaterial({
-        color: "#9ab7c9",
-        emissive: "#7d9db3",
-        emissiveIntensity: 0.08,
-        flatShading: true,
-        transparent: true,
-        opacity: 0.32,
-        roughness: 0.55
-      })
+    const cloud = enableShadows(
+      new Mesh(
+        new ConeGeometry(0.12, 0.28, 5),
+        new MeshStandardMaterial({
+          color: "#9ab7c9",
+          emissive: "#7d9db3",
+          emissiveIntensity: 0.08,
+          flatShading: true,
+          transparent: true,
+          opacity: 0.32,
+          roughness: 0.55
+        })
+      ),
+      false,
+      false
     );
     const angle = (i / 12) * Math.PI * 2;
     cloud.position.set(Math.cos(angle) * 0.84, 0.18 + (i % 3) * 0.04, Math.sin(angle) * 0.84);
@@ -575,8 +827,6 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
   stormGroup.add(stormClouds);
   stormGroup.visible = false;
   root.add(stormGroup);
-
-  const fog = scene.fog instanceof Fog ? scene.fog : null;
 
   return {
     root,
@@ -613,7 +863,41 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
         applyWaterConfig(false);
       }
     },
+    lighting: {
+      getConfig: () => ({
+        preset: atmosphereConfig.preset,
+        sunAzimuthDeg: atmosphereConfig.tuning.sunAzimuthDeg,
+        sunElevationDeg: atmosphereConfig.tuning.sunElevationDeg,
+        sunIntensity: atmosphereConfig.tuning.sunIntensity,
+        ambientIntensity: atmosphereConfig.tuning.ambientIntensity,
+        fogDensity: atmosphereConfig.tuning.fogDensity,
+        fogColor: atmosphereConfig.tuning.fogColor,
+        exposure: atmosphereConfig.tuning.exposure,
+        shadowMapResolution: atmosphereConfig.tuning.shadowMapResolution,
+        shadowCameraBounds: atmosphereConfig.tuning.shadowCameraBounds,
+        activeStormBlend,
+        effectiveExposure: currentExposure
+      }),
+      setPreset: (preset) => {
+        atmosphereConfig = {
+          preset,
+          tuning: createAtmosphereTuningFromPreset(preset)
+        };
+        applyLightingState();
+      },
+      updateTuning: (patch) => {
+        atmosphereConfig = {
+          ...atmosphereConfig,
+          tuning: sanitizeAtmosphereTuning(patch, atmosphereConfig.tuning)
+        };
+        applyLightingState();
+      },
+      getCurrentExposure: () => currentExposure
+    },
     syncFromWorld: (worldState, context) => {
+      lastCameraPosition.set(context.cameraPosition.x, context.cameraPosition.y, context.cameraPosition.z);
+      lastPlayerPosition.set(context.playerPose.x, 0, context.playerPose.z);
+
       water.position.set(context.cameraPosition.x, 0, context.cameraPosition.z);
       waterUniforms.uTime.value = context.renderTime;
       waterUniforms.uCameraPos.value.set(context.cameraPosition.x, context.cameraPosition.y, context.cameraPosition.z);
@@ -704,20 +988,9 @@ export function createEnvironment(scene: Scene, configuredWater: WaterRenderConf
         worldState.storm.active && worldState.storm.radius > 0
           ? clamp(1 - stormDistance / (worldState.storm.radius * 1.4), 0, 1)
           : 0;
-      const stormBlend = clamp(stormProximity * worldState.storm.intensity, 0, 1);
-      waterUniforms.uStormBlend.value = stormBlend;
-
-      if (fog) {
-        workingColor.copy(calmFogColor).lerp(stormFogColor, stormBlend);
-        fog.color.copy(workingColor);
-        fog.near = 70 - stormBlend * 18;
-        fog.far = 190 - stormBlend * 86;
-      }
-
-      if (scene.background instanceof Color) {
-        workingColor.copy(calmBackground).lerp(stormBackground, stormBlend * 0.8);
-        scene.background.copy(workingColor);
-      }
+      activeStormBlend = clamp(stormProximity * worldState.storm.intensity, 0, 1);
+      waterUniforms.uStormBlend.value = activeStormBlend;
+      applyLightingState();
     }
   };
 }

@@ -10,3 +10,9 @@ export type {
 } from "./adapters/renderBridge";
 export { createRenderWorld } from "./createRenderWorld";
 export type { WaterQualityLevel, WaterRenderConfig, WaterTuningControls } from "./water/waterConfig";
+export type {
+  AtmosphereDebugSnapshot,
+  AtmospherePresetId,
+  AtmosphereRenderConfig,
+  AtmosphereTuningControls
+} from "./atmosphere/atmosphereConfig";

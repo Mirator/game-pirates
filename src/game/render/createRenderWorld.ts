@@ -20,7 +20,7 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
   const cameraController = createCamera();
   const { camera } = cameraController;
 
-  const environment = createEnvironment(scene, renderConfig.water);
+  const environment = createEnvironment(scene, renderConfig.water, renderConfig.atmosphere);
 
   const playerMesh = createShipMesh("#7a3f1f", "#f6ecce");
   scene.add(playerMesh);
@@ -45,6 +45,8 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
       roughness: 0.42
     })
   );
+  beaconCore.castShadow = true;
+  beaconCore.receiveShadow = true;
   beaconCore.position.y = 2.2;
   portBeacon.add(beaconCore);
 
@@ -56,6 +58,8 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
       metalness: 0.2
     })
   );
+  beaconRing.castShadow = true;
+  beaconRing.receiveShadow = true;
   beaconRing.rotation.x = Math.PI * 0.5;
   beaconRing.position.y = 0.34;
   portBeacon.add(beaconRing);

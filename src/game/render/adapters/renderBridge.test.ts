@@ -65,6 +65,25 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
         }),
         setQuality: () => {},
         updateTuning: () => {}
+      },
+      lighting: {
+        getConfig: () => ({
+          preset: "clearDay",
+          sunAzimuthDeg: 54,
+          sunElevationDeg: 40,
+          sunIntensity: 1.08,
+          ambientIntensity: 0.56,
+          fogDensity: 0.0021,
+          fogColor: "#8fc6e4",
+          exposure: 1,
+          shadowMapResolution: 1024,
+          shadowCameraBounds: 95,
+          activeStormBlend: 0,
+          effectiveExposure: 1
+        }),
+        setPreset: () => {},
+        updateTuning: () => {},
+        getCurrentExposure: () => 1
       }
     },
     projectileRoot: new Group(),

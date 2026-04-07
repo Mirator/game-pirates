@@ -51,6 +51,7 @@ Deliverables:
 - Treasure objectives.
 - Event system.
 - Improved VFX.
+- Lighting, sky, and atmosphere polish (Spec 08 rendering track).
 - Music and balance pass.
 
 ## Build-First MVP Checklist

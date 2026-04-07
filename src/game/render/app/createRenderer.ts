@@ -1,4 +1,4 @@
-import { WebGLRenderer } from "three";
+import { ACESFilmicToneMapping, PCFSoftShadowMap, SRGBColorSpace, WebGLRenderer } from "three";
 
 export interface RendererContext {
   renderer: WebGLRenderer;
@@ -12,6 +12,16 @@ export function createRenderer(root: HTMLElement): RendererContext {
     antialias: true,
     alpha: false
   });
+
+  const applyRendererDefaults = (): void => {
+    renderer.outputColorSpace = SRGBColorSpace;
+    renderer.toneMapping = ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1;
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = PCFSoftShadowMap;
+  };
+
+  applyRendererDefaults();
   renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
   renderer.setSize(window.innerWidth, window.innerHeight);
 
@@ -27,6 +37,7 @@ export function createRenderer(root: HTMLElement): RendererContext {
 
   const onContextRestored = (): void => {
     contextLost = false;
+    applyRendererDefaults();
   };
 
   canvas.addEventListener("webglcontextlost", onContextLost, false);

@@ -13,7 +13,7 @@ to one or more spec files.
 - [05 Progression UX Art Audio](05-progression-ux-art-audio.md)
 - [06 Technical Architecture](06-technical-architecture.md)
 - [07 Roadmap and Scope Guardrails](07-roadmap-and-scope-guardrails.md)
-- [08 Stylized Ocean Rendering Upgrade](08-stylized-ocean-rendering.md)
+- [08 Stylized Ocean, Lighting, and Atmospheric Rendering Upgrade](08-stylized-ocean-rendering.md)
 
 ## How To Use
 

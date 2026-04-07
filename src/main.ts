@@ -34,6 +34,7 @@ const debugWindow = window as Window & {
   __BLACKWAKE_DEBUG__?: {
     worldState: typeof worldState;
     water?: ReturnType<typeof createRenderWorld>["bridge"]["environment"]["water"];
+    lighting?: ReturnType<typeof createRenderWorld>["bridge"]["environment"]["lighting"];
   };
 };
 const inputController = createInputState(window);
@@ -41,7 +42,12 @@ const inputController = createInputState(window);
 const rendererContext = createRenderer(app);
 const renderWorld = createRenderWorld();
 const { renderer } = rendererContext;
-debugWindow.__BLACKWAKE_DEBUG__ = { worldState, water: renderWorld.bridge.environment.water };
+renderer.toneMappingExposure = renderWorld.bridge.environment.lighting.getCurrentExposure();
+debugWindow.__BLACKWAKE_DEBUG__ = {
+  worldState,
+  water: renderWorld.bridge.environment.water,
+  lighting: renderWorld.bridge.environment.lighting
+};
 
 const debugOverlay = createDebugOverlay(app, window);
 const audioSystem = createAudioSystem(window);
@@ -220,6 +226,7 @@ const loop = createLoop({
   render: (frameDt, alpha) => {
     interpolationContext.alpha = alpha;
     syncRenderFromSimulation(worldState, renderWorld.bridge, frameDt, interpolationContext);
+    renderer.toneMappingExposure = renderWorld.bridge.environment.lighting.getCurrentExposure();
 
     fpsAccumulator += frameDt;
     fpsFrameCount += 1;
