@@ -105,6 +105,7 @@ export interface RenderBridgeState {
   seenProjectileIds: Set<number>;
   seenLootIds: Set<number>;
   knownProjectileOwners: Map<number, ShipOwner>;
+  knownProjectilePruneScratch: number[];
   cameraDesiredPosition: Vector3;
   cameraDesiredLookTarget: Vector3;
   cameraLookTarget: Vector3;
@@ -577,10 +578,15 @@ export function syncRenderFromSimulation(
     bridge.projectileMeshes.delete(id);
   }
 
-  for (const knownId of [...bridge.knownProjectileOwners.keys()]) {
+  const knownProjectilePruneScratch = bridge.knownProjectilePruneScratch;
+  knownProjectilePruneScratch.length = 0;
+  for (const knownId of bridge.knownProjectileOwners.keys()) {
     if (!seenProjectiles.has(knownId)) {
-      bridge.knownProjectileOwners.delete(knownId);
+      knownProjectilePruneScratch.push(knownId);
     }
+  }
+  for (const knownId of knownProjectilePruneScratch) {
+    bridge.knownProjectileOwners.delete(knownId);
   }
 
   updateShipVisualFx(worldState.player, bridge.playerVisual, bridge.playerFx, frameDt);

@@ -30,6 +30,8 @@ if (!app) {
 }
 
 const worldState = createInitialWorldState();
+const shouldExposeDebugHandles =
+  import.meta.env.DEV && (import.meta.env.VITE_E2E_DEBUG === "1" || import.meta.env.VITE_DEBUG_WORLD === "1");
 const debugWindow = window as Window & {
   __BLACKWAKE_DEBUG__?: {
     worldState: typeof worldState;
@@ -45,13 +47,15 @@ const rendererContext = createRenderer(app);
 const renderWorld = createRenderWorld();
 const { renderer } = rendererContext;
 renderer.toneMappingExposure = renderWorld.bridge.environment.lighting.getCurrentExposure();
-debugWindow.__BLACKWAKE_DEBUG__ = {
-  worldState,
-  water: renderWorld.bridge.environment.water,
-  lighting: renderWorld.bridge.environment.lighting,
-  wake: renderWorld.bridge.wakeDebug,
-  bridge: renderWorld.bridge
-};
+if (shouldExposeDebugHandles) {
+  debugWindow.__BLACKWAKE_DEBUG__ = {
+    worldState,
+    water: renderWorld.bridge.environment.water,
+    lighting: renderWorld.bridge.environment.lighting,
+    wake: renderWorld.bridge.wakeDebug,
+    bridge: renderWorld.bridge
+  };
+}
 
 const debugOverlay = createDebugOverlay(app, window);
 const audioSystem = createAudioSystem(window);
@@ -285,6 +289,9 @@ const cleanup = (): void => {
   audioSystem.dispose();
   renderWorld.dispose();
   rendererContext.dispose();
+  if (shouldExposeDebugHandles) {
+    delete debugWindow.__BLACKWAKE_DEBUG__;
+  }
 };
 
 window.addEventListener("beforeunload", cleanup, { once: true });

@@ -68,6 +68,7 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
     environment: {
       root: new Group(),
       syncFromWorld: environmentSync,
+      dispose: () => {},
       water: {
         getConfig: () => ({
           quality: "high",
@@ -114,6 +115,7 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
     seenProjectileIds: new Set(),
     seenLootIds: new Set(),
     knownProjectileOwners: new Map(),
+    knownProjectilePruneScratch: [],
     cameraDesiredPosition: new Vector3(),
     cameraDesiredLookTarget: new Vector3(),
     cameraLookTarget: new Vector3(),

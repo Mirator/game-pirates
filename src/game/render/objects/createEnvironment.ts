@@ -85,6 +85,7 @@ export interface EnvironmentSyncContext {
 export interface EnvironmentObjects {
   root: Group;
   syncFromWorld: (worldState: WorldState, context: EnvironmentSyncContext) => void;
+  dispose: () => void;
   water: {
     getConfig: () => WaterDebugSnapshot;
     setQuality: (quality: WaterQualityLevel) => void;
@@ -813,6 +814,7 @@ export function createEnvironment(
   const islandsRoot = new Group();
   root.add(islandsRoot);
   const islandMeshes = new Map<number, Group>();
+  const seenIslandIds = new Set<number>();
 
   const treasureBeamMaterial = new MeshStandardMaterial({
     color: "#ffe482",
@@ -901,6 +903,7 @@ export function createEnvironment(
   stormGroup.add(stormClouds);
   stormGroup.visible = false;
   root.add(stormGroup);
+  let disposed = false;
 
   return {
     root,
@@ -920,6 +923,9 @@ export function createEnvironment(
         foamThreshold: waterConfig.tuning.foamThreshold
       }),
       setQuality: (quality) => {
+        if (disposed) {
+          return;
+        }
         if (quality === waterConfig.quality) {
           return;
         }
@@ -930,6 +936,9 @@ export function createEnvironment(
         applyWaterConfig(true);
       },
       updateTuning: (patch) => {
+        if (disposed) {
+          return;
+        }
         waterConfig = {
           ...waterConfig,
           tuning: sanitizeWaterTuning(patch, waterConfig.tuning)
@@ -953,6 +962,9 @@ export function createEnvironment(
         effectiveExposure: currentExposure
       }),
       setPreset: (preset) => {
+        if (disposed) {
+          return;
+        }
         atmosphereConfig = {
           preset,
           tuning: createAtmosphereTuningFromPreset(preset)
@@ -960,6 +972,9 @@ export function createEnvironment(
         applyLightingState();
       },
       updateTuning: (patch) => {
+        if (disposed) {
+          return;
+        }
         atmosphereConfig = {
           ...atmosphereConfig,
           tuning: sanitizeAtmosphereTuning(patch, atmosphereConfig.tuning)
@@ -968,7 +983,40 @@ export function createEnvironment(
       },
       getCurrentExposure: () => currentExposure
     },
+    dispose: () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+
+      scene.remove(root);
+      scene.remove(sky);
+      scene.remove(sun);
+      scene.remove(sun.target);
+      scene.remove(hemisphere);
+      scene.fog = null;
+
+      disposeGroup(root);
+      islandMeshes.clear();
+      seenIslandIds.clear();
+
+      sky.geometry.dispose();
+      if (Array.isArray(sky.material)) {
+        for (const material of sky.material) {
+          (material as Material).dispose();
+        }
+      } else {
+        (sky.material as Material).dispose();
+      }
+
+      normalMapA.dispose();
+      normalMapB.dispose();
+      sun.shadow.map?.dispose();
+    },
     syncFromWorld: (worldState, context) => {
+      if (disposed) {
+        return;
+      }
       lastCameraPosition.set(context.cameraPosition.x, context.cameraPosition.y, context.cameraPosition.z);
       lastPlayerPosition.set(context.playerPose.x, 0, context.playerPose.z);
 
@@ -1037,7 +1085,7 @@ export function createEnvironment(
       }
       waterUniforms.uIslandCount.value = islandCount;
 
-      const seenIslands = new Set<number>();
+      seenIslandIds.clear();
       for (const island of worldState.islands) {
         let islandMesh = islandMeshes.get(island.id);
         if (!islandMesh) {
@@ -1046,11 +1094,11 @@ export function createEnvironment(
           islandsRoot.add(islandMesh);
         }
         islandMesh.position.set(island.position.x, 0, island.position.z);
-        seenIslands.add(island.id);
+        seenIslandIds.add(island.id);
       }
 
       for (const [id, islandMesh] of islandMeshes.entries()) {
-        if (seenIslands.has(id)) {
+        if (seenIslandIds.has(id)) {
           continue;
         }
         islandsRoot.remove(islandMesh);

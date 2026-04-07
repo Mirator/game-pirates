@@ -119,4 +119,11 @@ describe("createEnvironment water quality controls", () => {
     expect(sunDirection.x).toBeGreaterThan(0.65);
     expect(sunDirection.y).toBeGreaterThan(0.65);
   });
+
+  it("supports idempotent disposal", () => {
+    const scene = new Scene();
+    const environment = createEnvironment(scene);
+    expect(() => environment.dispose()).not.toThrow();
+    expect(() => environment.dispose()).not.toThrow();
+  });
 });

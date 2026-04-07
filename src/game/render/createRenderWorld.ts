@@ -1,4 +1,14 @@
-import { ConeGeometry, Group, Mesh, MeshStandardMaterial, PerspectiveCamera, Scene, TorusGeometry, Vector3 } from "three";
+import {
+  ConeGeometry,
+  Group,
+  Material,
+  Mesh,
+  MeshStandardMaterial,
+  PerspectiveCamera,
+  Scene,
+  TorusGeometry,
+  Vector3
+} from "three";
 import { PORT_POSITION } from "../simulation";
 import { createCamera } from "./app/createCamera";
 import { createRenderConfig, type RenderConfigOverrides } from "./app/renderConfig";
@@ -13,6 +23,24 @@ export interface RenderWorld {
   camera: PerspectiveCamera;
   bridge: RenderBridgeState;
   dispose: () => void;
+}
+
+function disposeGroup(group: Group): void {
+  group.traverse((obj) => {
+    const mesh = obj as Mesh;
+    if (!mesh.geometry || !mesh.material) {
+      return;
+    }
+
+    mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) {
+      for (const material of mesh.material) {
+        (material as Material).dispose();
+      }
+    } else {
+      (mesh.material as Material).dispose();
+    }
+  });
 }
 
 export function createRenderWorld(overrides: RenderConfigOverrides = {}): RenderWorld {
@@ -100,6 +128,7 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
     seenProjectileIds: new Set(),
     seenLootIds: new Set(),
     knownProjectileOwners: new Map(),
+    knownProjectilePruneScratch: [],
     cameraDesiredPosition: new Vector3(),
     cameraDesiredLookTarget: new Vector3(),
     cameraLookTarget: new Vector3(),
@@ -134,17 +163,47 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
     playerLastHp: 100,
     enemyLastHp: new Map()
   };
+  let disposed = false;
 
   return {
     scene,
     camera,
     bridge,
     dispose: () => {
+      if (disposed) {
+        return;
+      }
+      disposed = true;
+
       playerWakeController.dispose();
       for (const wakeController of bridge.enemyWakeControllers.values()) {
         wakeController.dispose();
       }
       bridge.enemyWakeControllers.clear();
+      bridge.environment.dispose();
+
+      disposeGroup(playerMesh);
+      disposeGroup(enemyRoot);
+      disposeGroup(projectileRoot);
+      disposeGroup(lootRoot);
+      disposeGroup(portBeacon);
+
+      scene.remove(playerMesh);
+      scene.remove(wakeRoot);
+      scene.remove(enemyRoot);
+      scene.remove(projectileRoot);
+      scene.remove(lootRoot);
+      scene.remove(portBeacon);
+
+      bridge.enemyMeshes.clear();
+      bridge.enemyVisuals.clear();
+      bridge.projectileMeshes.clear();
+      bridge.lootMeshes.clear();
+      bridge.enemyPoseCache.clear();
+      bridge.enemyFx.clear();
+      bridge.enemyLastHp.clear();
+      bridge.knownProjectileOwners.clear();
+
       cameraController.dispose();
     }
   };

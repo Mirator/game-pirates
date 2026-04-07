@@ -65,7 +65,8 @@ import {
   sideDotAgainstShipLeft
 } from "../sideMath";
 import { ensureEcsState, syncEcsFromWorldView, syncWorldViewFromEcs } from "./createEcsState";
-import type { EcsState, WorldWithEcs } from "./types";
+import { clamp, distanceSquared, normalizeAngle, steeringTowardHeading } from "./math";
+import type { EcsEnemyIntent, EcsState, WorldWithEcs } from "./types";
 
 interface MovementTuning {
   acceleration: number;
@@ -89,12 +90,6 @@ interface EnemyProfile {
   lootMaterialBase: number;
   lootCargoBase: number;
   mapDropEvery: number;
-}
-
-interface EnemyIntent {
-  throttle: number;
-  turn: number;
-  fireSide: CannonSide | null;
 }
 
 const EVENT_CYCLE: WorldEventKind[] = ["treasure_marker", "enemy_convoy", "storm", "navy_patrol"];
@@ -172,23 +167,6 @@ const ENEMY_PROFILES: Record<EnemyArchetype, EnemyProfile> = {
     mapDropEvery: 4
   }
 };
-
-function clamp(value: number, min: number, max: number): number {
-  return Math.min(max, Math.max(min, value));
-}
-
-function normalizeAngle(angle: number): number {
-  let wrapped = angle;
-  while (wrapped > Math.PI) wrapped -= Math.PI * 2;
-  while (wrapped < -Math.PI) wrapped += Math.PI * 2;
-  return wrapped;
-}
-
-function distanceSquared(ax: number, az: number, bx: number, bz: number): number {
-  const dx = bx - ax;
-  const dz = bz - az;
-  return dx * dx + dz * dz;
-}
 
 function emitEvent(worldState: WorldWithEcs, event: SimulationEvent): void {
   worldState.events.push(event);
@@ -626,11 +604,6 @@ function cleanupEcsTables(ecs: EcsState): void {
   }
 }
 
-function steeringTowardHeading(shipHeading: number, targetHeading: number): number {
-  const delta = normalizeAngle(targetHeading - shipHeading);
-  return clamp(delta / 0.65, -1, 1);
-}
-
 function setEnemyState(enemy: EnemyState, nextState: EnemyState["aiState"]): void {
   if (enemy.aiState === nextState) {
     return;
@@ -639,7 +612,7 @@ function setEnemyState(enemy: EnemyState, nextState: EnemyState["aiState"]): voi
   enemy.aiStateTimer = 0;
 }
 
-function enemyAiIntentSystem(worldState: WorldWithEcs, enemy: EnemyState, dt: number): EnemyIntent {
+function enemyAiIntentSystem(worldState: WorldWithEcs, enemy: EnemyState, dt: number): EcsEnemyIntent {
   const player = worldState.player;
   const profile = ENEMY_PROFILES[enemy.archetype];
   enemy.aiStateTimer += dt;
@@ -1143,13 +1116,13 @@ export function updateEcsSimulation(worldState: WorldWithEcs, inputState: InputS
   updateBurstSystem(worldState, inputState, dt);
 
   // 3) AI intent
-  const enemyIntents = new Map<number, EnemyIntent>();
+  const enemyIntents = ecs.enemyIntentScratch;
+  enemyIntents.clear();
   for (const enemy of ecs.enemyTable.values()) {
     enemyIntents.set(enemy.id, enemyAiIntentSystem(worldState, enemy, dt));
   }
 
   // 4) movement
-  updatePlayerRespawnSystem(worldState, dt);
   if (worldState.player.status === "alive") {
     const playerTuning = getPlayerMovementTuning(worldState);
     moveShip(worldState.player, inputState.throttle, inputState.turn, dt, playerTuning);

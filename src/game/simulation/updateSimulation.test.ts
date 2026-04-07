@@ -225,6 +225,50 @@ describe("updateSimulation ECS pipeline", () => {
     expect(worldState.flags.enemiesSunk).toBeGreaterThanOrEqual(1);
   });
 
+  it("decrements sink timer once per fixed tick while player is sinking", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    worldState.player.status = "sinking";
+    worldState.player.sinkTimer = SINK_DURATION;
+    worldState.player.speed = 6;
+    worldState.player.drift = 2.5;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+    expect(worldState.player.sinkTimer).toBeCloseTo(SINK_DURATION - FIXED_TIME_STEP, 6);
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+    expect(worldState.player.sinkTimer).toBeCloseTo(SINK_DURATION - FIXED_TIME_STEP * 2, 6);
+  });
+
+  it("respawns only after full sink duration elapses", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    worldState.player.status = "sinking";
+    worldState.player.sinkTimer = SINK_DURATION;
+    worldState.player.hp = 0;
+
+    const stepsToRespawn = Math.ceil(SINK_DURATION / FIXED_TIME_STEP);
+    step(worldState, neutralInput, stepsToRespawn - 1);
+    expect(worldState.player.status).toBe("sinking");
+    expect(worldState.flags.playerRespawns).toBe(0);
+
+    let elapsed = (stepsToRespawn - 1) * FIXED_TIME_STEP;
+    let guard = 0;
+    while (worldState.player.status === "sinking" && guard < 4) {
+      updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+      elapsed += FIXED_TIME_STEP;
+      guard += 1;
+    }
+
+    expect(worldState.player.status).toBe("alive");
+    expect(worldState.flags.playerRespawns).toBe(1);
+    expect(worldState.player.hp).toBe(worldState.player.maxHp);
+    expect(elapsed).toBeGreaterThanOrEqual(SINK_DURATION);
+    expect(elapsed - SINK_DURATION).toBeLessThanOrEqual(FIXED_TIME_STEP + 1e-6);
+  });
+
   it("collects loot with interact before docking when both are possible", () => {
     const worldState = createInitialWorldState();
     quietWorld(worldState);

@@ -38,7 +38,8 @@ export function createEcsState(worldState: WorldState): EcsState {
     shipTable,
     enemyTable,
     projectileTable,
-    lootTable
+    lootTable,
+    enemyIntentScratch: new Map()
   };
 }
 
