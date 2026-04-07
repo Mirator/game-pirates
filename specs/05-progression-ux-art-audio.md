@@ -45,7 +45,7 @@ Future additions:
 
 HUD includes:
 - Ship HP bar.
-- Port and starboard cannon reload indicators.
+- Left and right cannon reload indicators.
 - Gold counter.
 - Repair material counter.
 - Cargo counter.

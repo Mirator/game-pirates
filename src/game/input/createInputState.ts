@@ -29,31 +29,8 @@ function normalizeKey(key: string): string {
   return key.toLowerCase();
 }
 
-function setByLetter(keyState: KeyState, key: string, pressed: boolean, repeat: boolean): boolean {
+function setByFallbackKey(keyState: KeyState, key: string, pressed: boolean, repeat: boolean): boolean {
   switch (key) {
-    case "w":
-      keyState.forward = pressed;
-      return true;
-    case "s":
-      keyState.backward = pressed;
-      return true;
-    case "a":
-      keyState.left = pressed;
-      return true;
-    case "d":
-      keyState.right = pressed;
-      return true;
-    case "q":
-      keyState.fireLeft = pressed;
-      return true;
-    case "e":
-      keyState.fireRight = pressed;
-      return true;
-    case "r":
-      if (pressed && !repeat) {
-        keyState.repairQueued = true;
-      }
-      return true;
     case "shift":
       keyState.burst = pressed;
       return true;
@@ -132,6 +109,7 @@ export function createInputState(target: Window = window): InputController {
 
   const syncState = (): void => {
     state.throttle = clampAxis(keyState.backward, keyState.forward);
+    // Preserve screen-intuitive steering under the chase-camera orientation.
     state.turn = clampAxis(keyState.right, keyState.left);
     state.fireLeft = keyState.fireLeft;
     state.fireRight = keyState.fireRight;
@@ -140,12 +118,12 @@ export function createInputState(target: Window = window): InputController {
     state.burst = keyState.burst;
   };
 
-  const setKey = (code: string, key: string, pressed: boolean, repeat: boolean): boolean => {
-    const normalizedKey = normalizeKey(key);
-    if (setByLetter(keyState, normalizedKey, pressed, repeat)) {
+const setKey = (code: string, key: string, pressed: boolean, repeat: boolean): boolean => {
+    // Physical key positions are canonical for movement/fire controls.
+    if (setByCode(keyState, code, pressed, repeat)) {
       return true;
     }
-    return setByCode(keyState, code, pressed, repeat);
+    return setByFallbackKey(keyState, normalizeKey(key), pressed, repeat);
   };
 
   const onKeyDown = (event: KeyboardEvent): void => {

@@ -80,7 +80,7 @@ describe("updateSimulation ECS pipeline", () => {
     expect(worldState.nextProjectileId).toBeGreaterThan(projectileAfterFirstShot);
   });
 
-  it("fires from matching port and starboard batteries", () => {
+  it("fires from matching left and right batteries", () => {
     const worldState = createInitialWorldState();
     quietWorld(worldState);
 
@@ -96,11 +96,11 @@ describe("updateSimulation ECS pipeline", () => {
     updateSimulation(worldState, { ...neutralInput, fireRight: true }, FIXED_TIME_STEP);
     expect(worldState.player.reload.right).toBeGreaterThan(0);
 
-    const portShot = worldState.projectiles.find((projectile) => projectile.id === 1);
-    const starboardShot = worldState.projectiles.find((projectile) => projectile.id === 2);
+    const leftShot = worldState.projectiles.find((projectile) => projectile.id === 1);
+    const rightShot = worldState.projectiles.find((projectile) => projectile.id === 2);
 
-    expect(portShot?.position.x ?? 0).toBeGreaterThan(0);
-    expect(starboardShot?.position.x ?? 0).toBeLessThan(0);
+    expect(leftShot?.position.x ?? 0).toBeGreaterThan(0);
+    expect(rightShot?.position.x ?? 0).toBeLessThan(0);
   });
 
   it("spawns enemies with initial and staggered timing up to cap", () => {

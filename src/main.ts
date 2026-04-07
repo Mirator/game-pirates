@@ -36,6 +36,7 @@ const debugWindow = window as Window & {
     water?: ReturnType<typeof createRenderWorld>["bridge"]["environment"]["water"];
     lighting?: ReturnType<typeof createRenderWorld>["bridge"]["environment"]["lighting"];
     wake?: ReturnType<typeof createRenderWorld>["bridge"]["wakeDebug"];
+    bridge?: ReturnType<typeof createRenderWorld>["bridge"];
   };
 };
 const inputController = createInputState(window);
@@ -48,7 +49,8 @@ debugWindow.__BLACKWAKE_DEBUG__ = {
   worldState,
   water: renderWorld.bridge.environment.water,
   lighting: renderWorld.bridge.environment.lighting,
-  wake: renderWorld.bridge.wakeDebug
+  wake: renderWorld.bridge.wakeDebug,
+  bridge: renderWorld.bridge
 };
 
 const debugOverlay = createDebugOverlay(app, window);

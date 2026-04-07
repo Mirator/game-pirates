@@ -349,6 +349,41 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     expect(Math.max(...deltas)).toBeLessThan(0.09);
   });
 
+  it("keeps an upright camera basis and unflipped projection while turning", () => {
+    const worldState = createInitialWorldState();
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    const headingSamples = [0, 0.4, 1.1, -0.7];
+    let previousHeading = worldState.player.heading;
+
+    for (const heading of headingSamples) {
+      worldState.player.heading = heading;
+      interpolation.previousSnapshot.player.heading = previousHeading;
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+
+      const forwardX = Math.sin(heading);
+      const forwardZ = Math.cos(heading);
+      const rightX = forwardZ;
+      const rightZ = -forwardX;
+
+      const depth = 20;
+      const sideOffset = 8;
+      const baseX = worldState.player.position.x + forwardX * depth;
+      const baseZ = worldState.player.position.z + forwardZ * depth;
+
+      const plusX = new Vector3(baseX + rightX * sideOffset, 1.2, baseZ + rightZ * sideOffset).project(bridge.camera).x;
+      const minusX = new Vector3(baseX - rightX * sideOffset, 1.2, baseZ - rightZ * sideOffset).project(bridge.camera).x;
+      expect(Math.abs(plusX - minusX)).toBeGreaterThan(0.01);
+
+      const cameraUpWorld = new Vector3(0, 1, 0).applyQuaternion(bridge.camera.quaternion);
+      expect(cameraUpWorld.y).toBeGreaterThan(0.2);
+      expect(bridge.camera.projectionMatrix.elements[0] ?? 0).toBeGreaterThan(0);
+
+      previousHeading = heading;
+    }
+  });
+
   it("applies bob, roll, pitch, and wake from movement state", () => {
     const worldState = createInitialWorldState();
     worldState.player.speed = 12;
@@ -399,35 +434,57 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     const enemy = createEnemyState(1, 8, 0, 0);
     worldState.enemies.push(enemy);
 
-    worldState.projectiles.push({
-      id: 1,
-      owner: "player",
-      position: { x: 2.8, z: 1.2 },
-      velocity: { x: 0, z: 0 },
-      lifetime: 2,
-      active: true
-    });
-    worldState.projectiles.push({
-      id: 2,
-      owner: "enemy",
-      position: { x: 9.4, z: 0.8 },
-      velocity: { x: 0, z: 0 },
-      lifetime: 2,
-      active: true
-    });
+    worldState.projectiles.push(
+      {
+        id: 1,
+        owner: "player",
+        position: { x: -2.8, z: 1.2 },
+        velocity: { x: 0, z: 0 },
+        lifetime: 2,
+        active: true
+      },
+      {
+        id: 2,
+        owner: "player",
+        position: { x: 2.8, z: 1.2 },
+        velocity: { x: 0, z: 0 },
+        lifetime: 2,
+        active: true
+      },
+      {
+        id: 3,
+        owner: "enemy",
+        position: { x: 5.4, z: 0.8 },
+        velocity: { x: 0, z: 0 },
+        lifetime: 2,
+        active: true
+      },
+      {
+        id: 4,
+        owner: "enemy",
+        position: { x: 10.6, z: 0.8 },
+        velocity: { x: 0, z: 0 },
+        lifetime: 2,
+        active: true
+      }
+    );
 
     const interpolation = createInterpolationContext(worldState, 1);
     const bridge = createBridge();
     syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
 
     expect(bridge.playerFx.muzzleLeftTimer).toBeGreaterThan(0);
+    expect(bridge.playerFx.muzzleRightTimer).toBeGreaterThan(0);
     expect(bridge.playerVisual.muzzleLeft.group.visible).toBe(true);
+    expect(bridge.playerVisual.muzzleRight.group.visible).toBe(true);
 
     const enemyFx = bridge.enemyFx.get(enemy.id);
     expect(enemyFx).toBeDefined();
     expect(enemyFx?.muzzleLeftTimer ?? 0).toBeGreaterThan(0);
+    expect(enemyFx?.muzzleRightTimer ?? 0).toBeGreaterThan(0);
     const enemyVisual = bridge.enemyVisuals.get(enemy.id);
     expect(enemyVisual?.muzzleLeft.group.visible ?? false).toBe(true);
+    expect(enemyVisual?.muzzleRight.group.visible ?? false).toBe(true);
   });
 
   it("shows wake for moving enemies and decays when they stop", () => {

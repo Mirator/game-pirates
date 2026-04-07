@@ -12,8 +12,8 @@ Phase 2 browser prototype for the pirate game design:
 ## Controls
 
 - `W` / `S`: accelerate / decelerate
-- `A` / `D`: turn port / starboard
-- `Q` / `E`: fire port / starboard batteries
+- `A` / `D`: turn left / right
+- `Q` / `E`: fire left / right batteries
 - `Space`: collect loot / dock / undock
 - `R`: consume repair material to repair hull (cooldown applies)
 - `Shift`: hold for temporary speed burst (cooldown applies)

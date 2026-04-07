@@ -21,6 +21,7 @@ import {
   type ShipState,
   type WorldState
 } from "../../simulation";
+import { classifyRelativeSide } from "../../simulation/sideMath";
 import type { EnvironmentObjects } from "../objects/createEnvironment";
 import { createShipDefinition, createShipMesh, type ShipVisual, type ShipVisualRole } from "../objects/createShipMesh";
 import {
@@ -35,6 +36,7 @@ const HIT_FLASH_DURATION = 0.24;
 const MUZZLE_FLASH_DURATION = 0.18;
 const FLASH_COLOR = new Color("#ff8a56");
 const MUZZLE_MIN_DISTANCE_SQ = 52;
+const CAMERA_WORLD_UP = new Vector3(0, 1, 0);
 const WAKE_POSITION_SCRATCH = new Vector3();
 const WAKE_FORWARD_SCRATCH = new Vector3();
 
@@ -336,17 +338,15 @@ function disposeGroup(group: Group): void {
 }
 
 function detectBroadsideSide(ship: ShipState, projectile: ProjectileState): CannonSide {
-  const forwardX = Math.sin(ship.heading);
-  const forwardZ = Math.cos(ship.heading);
   const toProjectileX = projectile.position.x - ship.position.x;
   const toProjectileZ = projectile.position.z - ship.position.z;
-  const cross = forwardX * toProjectileZ - forwardZ * toProjectileX;
+  return classifyRelativeSide(ship.heading, toProjectileX, toProjectileZ);
+}
 
-  if (Math.abs(cross) <= 0.00001) {
-    return toProjectileX >= 0 ? "left" : "right";
-  }
-
-  return cross < 0 ? "left" : "right";
+function orientCameraWithCanonicalBasis(camera: PerspectiveCamera, lookTarget: Vector3): void {
+  camera.up.copy(CAMERA_WORLD_UP);
+  camera.lookAt(lookTarget);
+  camera.updateMatrixWorld();
 }
 
 function triggerHitFlash(fx: ShipFxRuntimeState): void {
@@ -706,7 +706,7 @@ export function syncRenderFromSimulation(
 
   bridge.camera.position.lerp(bridge.cameraDesiredPosition, positionFollowStrength);
   bridge.cameraLookTarget.lerp(bridge.cameraDesiredLookTarget, lookFollowStrength);
-  bridge.camera.lookAt(bridge.cameraLookTarget);
+  orientCameraWithCanonicalBasis(bridge.camera, bridge.cameraLookTarget);
 
   bridge.environment.syncFromWorld(worldState, {
     frameDt,

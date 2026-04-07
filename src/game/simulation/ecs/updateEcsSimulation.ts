@@ -57,6 +57,13 @@ import type {
   SimulationEvent,
   WorldEventKind
 } from "../types";
+import {
+  calculateForwardVector as calculateForward,
+  calculateLeftVector as calculateLeft,
+  classifySideFromLeftDot,
+  getBroadsideVector,
+  sideDotAgainstShipLeft
+} from "../sideMath";
 import { ensureEcsState, syncEcsFromWorldView, syncWorldViewFromEcs } from "./createEcsState";
 import type { EcsState, WorldWithEcs } from "./types";
 
@@ -175,15 +182,6 @@ function normalizeAngle(angle: number): number {
   while (wrapped > Math.PI) wrapped -= Math.PI * 2;
   while (wrapped < -Math.PI) wrapped += Math.PI * 2;
   return wrapped;
-}
-
-function calculateForward(heading: number): { x: number; z: number } {
-  return { x: Math.sin(heading), z: Math.cos(heading) };
-}
-
-function calculateLeft(heading: number): { x: number; z: number } {
-  const forward = calculateForward(heading);
-  return { x: -forward.z, z: forward.x };
 }
 
 function distanceSquared(ax: number, az: number, bx: number, bz: number): number {
@@ -410,9 +408,7 @@ function spawnEnemyIfNeeded(worldState: WorldWithEcs, ecs: EcsState): void {
 
 function addProjectile(worldState: WorldWithEcs, ecs: EcsState, ship: ShipState, side: CannonSide): void {
   const forward = calculateForward(ship.heading);
-  const leftVector = calculateLeft(ship.heading);
-  const rightVector = { x: -leftVector.x, z: -leftVector.z };
-  const sideVector = side === "left" ? rightVector : leftVector;
+  const sideVector = getBroadsideVector(ship.heading, side);
 
   const directionX = sideVector.x * 0.96 + forward.x * 0.14;
   const directionZ = sideVector.z * 0.96 + forward.z * 0.14;
@@ -705,8 +701,8 @@ function enemyAiIntentSystem(worldState: WorldWithEcs, enemy: EnemyState, dt: nu
     turn = steeringTowardHeading(enemy.heading, targetHeading);
   } else {
     const angleToPlayer = Math.atan2(dx, dz);
-    const broadsideLeft = normalizeAngle(angleToPlayer - Math.PI * 0.5);
-    const broadsideRight = normalizeAngle(angleToPlayer + Math.PI * 0.5);
+    const broadsideLeft = normalizeAngle(angleToPlayer + Math.PI * 0.5);
+    const broadsideRight = normalizeAngle(angleToPlayer - Math.PI * 0.5);
     const leftDelta = Math.abs(normalizeAngle(broadsideLeft - enemy.heading));
     const rightDelta = Math.abs(normalizeAngle(broadsideRight - enemy.heading));
     const targetHeading = leftDelta < rightDelta ? broadsideLeft : broadsideRight;
@@ -730,7 +726,7 @@ function enemyAiIntentSystem(worldState: WorldWithEcs, enemy: EnemyState, dt: nu
         const normalizedToPlayerZ = dz / toPlayerLength;
         const forward = calculateForward(enemy.heading);
         const dot = forward.x * normalizedToPlayerX + forward.z * normalizedToPlayerZ;
-        const cross = forward.x * normalizedToPlayerZ - forward.z * normalizedToPlayerX;
+        const sideDot = sideDotAgainstShipLeft(enemy.heading, normalizedToPlayerX, normalizedToPlayerZ);
 
         const fireDotLimit = enemy.archetype === "navy" ? CANNON_FIRING_CONE_DOT + 0.12 : CANNON_FIRING_CONE_DOT;
         const canFire =
@@ -739,7 +735,7 @@ function enemyAiIntentSystem(worldState: WorldWithEcs, enemy: EnemyState, dt: nu
           (enemy.archetype !== "merchant" || toPlayerLength <= profile.broadsideRange * 0.85);
 
         if (canFire && enemy.aiStateTimer >= 0.18) {
-          fireSide = cross > 0 ? "right" : "left";
+          fireSide = classifySideFromLeftDot(sideDot);
           setEnemyState(enemy, "fire");
         } else {
           setEnemyState(enemy, "line_up_broadside");

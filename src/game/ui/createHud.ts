@@ -41,7 +41,7 @@ const ONBOARDING_STEPS: OnboardingStep[] = [
   },
   {
     title: "Fight On The Broadside",
-    body: "Fire port cannons with Q and starboard cannons with E. Watch reload bars and keep your hull angled."
+    body: "Fire left cannons with Q and right cannons with E. Watch reload bars and keep your hull angled."
   },
   {
     title: "Dock, Sell, Upgrade",
@@ -190,7 +190,7 @@ function resolvePrompt(worldState: WorldState): PromptInfo {
 
   if (hasNearbyEnemy(worldState, DANGER_ENEMY_DISTANCE)) {
     return {
-      text: "Enemy broadside range. Keep turning and fire Q/E.",
+      text: "Enemy broadside range. Keep turning and fire left/right with Q/E.",
       priority: "danger"
     };
   }
@@ -331,7 +331,7 @@ function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): void {
 
   ctx.save();
   ctx.translate(playerX, playerY);
-  ctx.rotate(player.heading);
+  ctx.rotate(-player.heading);
   ctx.strokeStyle = "rgba(247, 248, 250, 0.86)";
   ctx.lineWidth = 1.3;
   ctx.beginPath();
@@ -432,7 +432,7 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
 
   const leftReloadLabel = document.createElement("span");
   leftReloadLabel.className = "hud-label";
-  leftReloadLabel.textContent = "Port Cannons";
+  leftReloadLabel.textContent = "Left Cannons";
   leftReloadTop.appendChild(leftReloadLabel);
 
   const leftReloadValue = document.createElement("span");
@@ -457,7 +457,7 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
 
   const rightReloadLabel = document.createElement("span");
   rightReloadLabel.className = "hud-label";
-  rightReloadLabel.textContent = "Starboard Cannons";
+  rightReloadLabel.textContent = "Right Cannons";
   rightReloadTop.appendChild(rightReloadLabel);
 
   const rightReloadValue = document.createElement("span");
@@ -590,7 +590,7 @@ export function createHud(root: HTMLElement, options: HudOptions): HudController
 
   const controlsList = document.createElement("p");
   controlsList.className = "pause-menu-list";
-  controlsList.textContent = "W/S speed  A/D turn  Q/E fire  Space interact  R repair  Shift burst  Esc pause";
+  controlsList.textContent = "W/S speed  A/D turn  Q left fire  E right fire  Space interact  R repair  Shift burst  Esc pause";
   pauseMenu.appendChild(controlsList);
 
   const loopTipsTitle = document.createElement("h3");
