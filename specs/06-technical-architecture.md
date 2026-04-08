@@ -8,6 +8,7 @@ render-simulation separation, and multiplayer-ready data flow.
 Cross-spec dependencies:
 
 - Spec 11 (physics authority).
+- Spec 12 (ship handling authority).
 - Spec 08/10 (render-only water/wake presentation consuming simulation state).
 
 ## Core Principle
@@ -27,7 +28,8 @@ updates.
 ## Key Systems
 
 - Input and interaction system.
-- Physics integration system (gravity, buoyancy, drag, torque).
+- Movement handling controller (throttle/turn/boost, speed states, stabilization).
+- Physics integration system (gravity, buoyancy, drag, vertical damping).
 - Collision and impulse system.
 - Combat fire + projectile system.
 - Damage/sinking/respawn system.
@@ -62,7 +64,7 @@ Simulation tick order:
 1. Input capture and interaction intent.
 2. Event timers and world-event lifecycle.
 3. AI intent generation.
-4. Ship force/torque integration and buoyancy update.
+4. Ship planar handling update (Spec 12) + buoyancy/gravity update (Spec 11).
 5. Bounds correction and collision/impulse resolution.
 6. Combat fire and recoil application.
 7. Projectile ballistic integration and hit resolution.

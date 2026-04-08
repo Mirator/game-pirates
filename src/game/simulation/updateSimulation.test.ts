@@ -108,6 +108,26 @@ function seaHeightAt(worldState: WorldState, x: number, z: number): number {
   return worldState.physics.seaLevel + sampleWaterHeight(DEFAULT_WATER_SURFACE_WAVES, { x, z }, worldState.time, DEFAULT_WATER_SURFACE_TUNING);
 }
 
+function setPlayerVelocityFromLocalAxes(worldState: WorldState, forwardSpeed: number, driftSpeed: number): void {
+  const forwardX = Math.sin(worldState.player.heading);
+  const forwardZ = Math.cos(worldState.player.heading);
+  const leftX = -forwardZ;
+  const leftZ = forwardX;
+  worldState.player.linearVelocity.x = forwardX * forwardSpeed + leftX * driftSpeed;
+  worldState.player.linearVelocity.z = forwardZ * forwardSpeed + leftZ * driftSpeed;
+}
+
+function headingVelocityDivergence(worldState: WorldState): number {
+  const vx = worldState.player.linearVelocity.x;
+  const vz = worldState.player.linearVelocity.z;
+  const planarSpeed = Math.hypot(vx, vz);
+  if (planarSpeed < 0.2) {
+    return 0;
+  }
+  const moveHeading = Math.atan2(vx, vz);
+  return Math.abs(normalizeAngle(moveHeading - worldState.player.heading));
+}
+
 describe("updateSimulation ECS pipeline", () => {
   it("starts player spawn above local waterline freeboard", () => {
     const worldState = createInitialWorldState();
@@ -127,8 +147,8 @@ describe("updateSimulation ECS pipeline", () => {
 
     step(worldState, { ...neutralInput, throttle: 1, turn: 1 }, 120);
     expect(worldState.player.speed).toBeGreaterThan(2);
-    expect(worldState.player.heading).toBeGreaterThan(startHeading + 0.2);
-    expect(Math.hypot(worldState.player.position.x - startX, worldState.player.position.z - startZ)).toBeGreaterThan(8);
+    expect(Math.abs(normalizeAngle(worldState.player.heading - startHeading))).toBeGreaterThan(0.2);
+    expect(Math.hypot(worldState.player.position.x - startX, worldState.player.position.z - startZ)).toBeGreaterThan(2.5);
 
     updateSimulation(worldState, { ...neutralInput, fireLeft: true }, FIXED_TIME_STEP);
     const projectileAfterFirstShot = worldState.nextProjectileId;
@@ -138,6 +158,109 @@ describe("updateSimulation ECS pipeline", () => {
     const stepsToReload = Math.ceil(CANNON_RELOAD_TIME / FIXED_TIME_STEP) + 1;
     step(worldState, { ...neutralInput, fireLeft: true }, stepsToReload);
     expect(worldState.nextProjectileId).toBeGreaterThan(projectileAfterFirstShot);
+  });
+
+  it("keeps rotate-in-place very weak when stationary", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    worldState.player.heading = 0;
+    worldState.player.linearVelocity.x = 0;
+    worldState.player.linearVelocity.z = 0;
+    const startHeading = worldState.player.heading;
+
+    step(worldState, { ...neutralInput, turn: 1 }, 60);
+    const turnDelta = Math.abs(normalizeAngle(worldState.player.heading - startHeading));
+    expect(turnDelta).toBeLessThan(0.25);
+  });
+
+  it("peaks initial turn authority at medium speed and weakens at low/high speed", () => {
+    const lowSpeedWorld = createInitialWorldState();
+    const mediumSpeedWorld = createInitialWorldState();
+    const highSpeedWorld = createInitialWorldState();
+    quietWorld(lowSpeedWorld);
+    quietWorld(mediumSpeedWorld);
+    quietWorld(highSpeedWorld);
+
+    lowSpeedWorld.player.heading = 0;
+    mediumSpeedWorld.player.heading = 0;
+    highSpeedWorld.player.heading = 0;
+
+    setPlayerVelocityFromLocalAxes(lowSpeedWorld, 3, 0);
+    setPlayerVelocityFromLocalAxes(mediumSpeedWorld, 20, 0);
+    setPlayerVelocityFromLocalAxes(highSpeedWorld, 36, 0);
+
+    step(lowSpeedWorld, { ...neutralInput, turn: 1 }, 1);
+    step(mediumSpeedWorld, { ...neutralInput, turn: 1 }, 1);
+    step(highSpeedWorld, { ...neutralInput, turn: 1 }, 1);
+
+    const lowTurnRate = Math.abs(lowSpeedWorld.player.angularVelocity);
+    const mediumTurnRate = Math.abs(mediumSpeedWorld.player.angularVelocity);
+    const highTurnRate = Math.abs(highSpeedWorld.player.angularVelocity);
+
+    expect(lowTurnRate).toBeGreaterThan(0.01);
+    expect(mediumTurnRate).toBeGreaterThan(lowTurnRate);
+    expect(mediumTurnRate).toBeGreaterThan(highTurnRate);
+  });
+
+  it("applies boost turning tradeoff at matched speed", () => {
+    const normalWorld = createInitialWorldState();
+    const boostWorld = createInitialWorldState();
+    quietWorld(normalWorld);
+    quietWorld(boostWorld);
+
+    normalWorld.player.heading = 0;
+    boostWorld.player.heading = 0;
+    setPlayerVelocityFromLocalAxes(normalWorld, 20, 0);
+    setPlayerVelocityFromLocalAxes(boostWorld, 20, 0);
+
+    step(normalWorld, { ...neutralInput, turn: 1 }, 20);
+    step(boostWorld, { ...neutralInput, turn: 1, burst: true }, 20);
+
+    const normalTurn = Math.abs(normalizeAngle(normalWorld.player.heading));
+    const boostTurn = Math.abs(normalizeAngle(boostWorld.player.heading));
+    expect(boostTurn).toBeLessThan(normalTurn);
+  });
+
+  it("damps lateral drift faster than forward momentum", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    worldState.player.heading = 0;
+    setPlayerVelocityFromLocalAxes(worldState, 8, 4);
+    const startForward = Math.abs(worldState.player.speed || 8);
+    const startDrift = Math.abs(worldState.player.drift || 4);
+
+    step(worldState, neutralInput, 10);
+
+    expect(Math.abs(worldState.player.drift)).toBeLessThan(startDrift * 0.25);
+    expect(Math.abs(worldState.player.speed)).toBeGreaterThan(startForward * 0.3);
+  });
+
+  it("uses heading assist to reduce velocity-facing divergence", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    worldState.player.heading = 0;
+    setPlayerVelocityFromLocalAxes(worldState, 1.5, -8.5);
+    const divergenceBefore = headingVelocityDivergence(worldState);
+
+    step(worldState, neutralInput, 20);
+
+    const divergenceAfter = headingVelocityDivergence(worldState);
+    expect(divergenceAfter).toBeLessThan(divergenceBefore);
+  });
+
+  it("keeps reverse speed meaningfully weaker than forward speed", () => {
+    const forwardWorld = createInitialWorldState();
+    const reverseWorld = createInitialWorldState();
+    quietWorld(forwardWorld);
+    quietWorld(reverseWorld);
+
+    step(forwardWorld, { ...neutralInput, throttle: 1 }, 24);
+    step(reverseWorld, { ...neutralInput, throttle: -1 }, 24);
+
+    expect(Math.abs(reverseWorld.player.speed)).toBeLessThan(Math.abs(forwardWorld.player.speed) * 0.6);
   });
 
   it("fires from matching left and right batteries", () => {
@@ -430,19 +553,53 @@ describe("updateSimulation ECS pipeline", () => {
     expect(worldState.wallet.gold).toBe(224);
   });
 
-  it("activates burst, expires it, and enforces cooldown", () => {
+  it("activates burst while held, ends on release, and enforces cooldown", () => {
     const worldState = createInitialWorldState();
     quietWorld(worldState);
 
     updateSimulation(worldState, { ...neutralInput, burst: true }, FIXED_TIME_STEP);
     expect(worldState.burst.active).toBe(true);
 
-    step(worldState, { ...neutralInput, burst: true, throttle: 1 }, Math.ceil(1.2 / FIXED_TIME_STEP) + 3);
+    step(worldState, { ...neutralInput, burst: true, throttle: 1 }, 12);
+    updateSimulation(worldState, { ...neutralInput, burst: false, throttle: 1 }, FIXED_TIME_STEP);
     expect(worldState.burst.active).toBe(false);
-    expect(worldState.burst.cooldown).toBeGreaterThan(0);
+    const cooldownAfterRelease = worldState.burst.cooldown;
+    expect(cooldownAfterRelease).toBeGreaterThan(0);
 
-    step(worldState, { ...neutralInput, burst: true }, Math.ceil(4 / FIXED_TIME_STEP) + 3);
+    step(worldState, { ...neutralInput, burst: true }, Math.ceil(cooldownAfterRelease / FIXED_TIME_STEP) + 3);
     expect(worldState.burst.active).toBe(true);
+  });
+
+  it("caps angular kick from ship collisions for stable recovery", () => {
+    const worldState = createInitialWorldState();
+    worldState.eventDirector.timer = 999;
+
+    step(worldState, neutralInput, Math.ceil(ENEMY_INITIAL_SPAWN_DELAY / FIXED_TIME_STEP) + 1);
+    worldState.spawnDirector.maxActive = 0;
+
+    const enemy = worldState.enemies[0];
+    expect(enemy).toBeDefined();
+    if (!enemy) {
+      throw new Error("Expected one spawned enemy.");
+    }
+
+    worldState.player.position.x = 0;
+    worldState.player.position.z = 0;
+    worldState.player.heading = 0;
+    worldState.player.angularVelocity = 0;
+    setPlayerVelocityFromLocalAxes(worldState, 3, 10);
+
+    enemy.position.x = 0.6;
+    enemy.position.z = 0;
+    enemy.heading = 0;
+    enemy.angularVelocity = 0;
+    enemy.linearVelocity.x = 10;
+    enemy.linearVelocity.z = 2;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+
+    expect(Math.abs(worldState.player.angularVelocity)).toBeLessThan(0.45);
+    expect(Math.abs(enemy.angularVelocity)).toBeLessThan(0.45);
   });
 
   it("collects treasure map loot and consumes map on objective completion", () => {

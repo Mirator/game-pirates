@@ -17,6 +17,7 @@ to one or more spec files.
 - [09 Ship Visual and Gameplay Representation Upgrade](09-ship-visual-and-gameplay-representation-upgrade.md)
 - [10 Stylized Ship Wake Rendering System](10-ship-wake-rendering-system.md)
 - [11 Gravity-Based Physics System](11-gravity-based-physics-system.md)
+- [12 Player and Ship Movement System](12-player-and-ship-movement-system.md)
 
 ## How To Use
 
@@ -25,3 +26,5 @@ to one or more spec files.
 - Treat this folder as the source of truth over older notes.
 - Treat Spec 11 as the canonical gameplay-physics authority for gravity, buoyancy,
   projectile ballistics, and collision force behavior.
+- Treat Spec 12 as the canonical ship handling authority for throttle, turn,
+  boost, speed states, drift control, and heading assist behavior.

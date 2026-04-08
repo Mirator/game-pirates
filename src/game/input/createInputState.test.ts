@@ -85,4 +85,23 @@ describe("createInputState", () => {
     target.dispatch("keydown", { code: "KeyD", key: "d", repeat: false });
     expect(controller.state.turn).toBe(-1);
   });
+
+  it("supports arrow-key aliases for throttle and steering", () => {
+    const target = new MockWindowTarget();
+    const controller = createInputState(target as unknown as Window);
+
+    target.dispatch("keydown", { code: "ArrowUp", key: "ArrowUp", repeat: false });
+    expect(controller.state.throttle).toBe(1);
+
+    target.dispatch("keydown", { code: "ArrowLeft", key: "ArrowLeft", repeat: false });
+    expect(controller.state.turn).toBe(1);
+
+    target.dispatch("keyup", { code: "ArrowLeft", key: "ArrowLeft", repeat: false });
+    target.dispatch("keydown", { code: "ArrowRight", key: "ArrowRight", repeat: false });
+    expect(controller.state.turn).toBe(-1);
+
+    target.dispatch("keyup", { code: "ArrowUp", key: "ArrowUp", repeat: false });
+    target.dispatch("keydown", { code: "ArrowDown", key: "ArrowDown", repeat: false });
+    expect(controller.state.throttle).toBe(-1);
+  });
 });

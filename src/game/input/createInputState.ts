@@ -31,6 +31,18 @@ function normalizeKey(key: string): string {
 
 function setByFallbackKey(keyState: KeyState, key: string, pressed: boolean, repeat: boolean): boolean {
   switch (key) {
+    case "arrowup":
+      keyState.forward = pressed;
+      return true;
+    case "arrowdown":
+      keyState.backward = pressed;
+      return true;
+    case "arrowleft":
+      keyState.left = pressed;
+      return true;
+    case "arrowright":
+      keyState.right = pressed;
+      return true;
     case "shift":
       keyState.burst = pressed;
       return true;
@@ -48,15 +60,19 @@ function setByFallbackKey(keyState: KeyState, key: string, pressed: boolean, rep
 function setByCode(keyState: KeyState, code: string, pressed: boolean, repeat: boolean): boolean {
   switch (code) {
     case "KeyW":
+    case "ArrowUp":
       keyState.forward = pressed;
       return true;
     case "KeyS":
+    case "ArrowDown":
       keyState.backward = pressed;
       return true;
     case "KeyA":
+    case "ArrowLeft":
       keyState.left = pressed;
       return true;
     case "KeyD":
+    case "ArrowRight":
       keyState.right = pressed;
       return true;
     case "KeyQ":

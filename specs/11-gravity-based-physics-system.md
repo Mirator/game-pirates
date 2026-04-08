@@ -8,6 +8,10 @@ Gravity-Based Physics System for Ships, Cannonballs, Floating Objects, and World
 
 Create a coherent, gameplay-first physics model where all major moving world objects follow shared gravity, buoyancy, drag, momentum, and collision rules. The target is believable and readable stylized naval action, not full simulation.
 
+Cross-spec dependency:
+
+- Spec 12 is the canonical ship handling authority for throttle/turn/boost feel.
+
 ## Core Principle
 
 All major physical entities follow the same base rules:
@@ -18,6 +22,21 @@ All major physical entities follow the same base rules:
 - collisions produce force and damage outcomes.
 - heavier objects feel heavier.
 - fast objects feel dangerous.
+
+## Authority Boundary
+
+This spec is authoritative for:
+
+- gravity.
+- buoyancy/water-medium response.
+- ballistic projectile behavior.
+- collision-force foundations.
+
+This spec is not authoritative for:
+
+- planar ship handling feel (turn responsiveness, speed-state handling, boost
+  control tradeoffs, drift suppression, heading assist). These are owned by
+  Spec 12.
 
 ## Goals and Non-Goals
 
@@ -194,7 +213,7 @@ Expose gameplay-tunable parameters for:
 - damage-based buoyancy degradation and differentiated ship class inertia.
 - improved debris/wreck behavior.
 - deeper wave-sampling influence where enabled.
-- finalize rigid-body-first contracts and remove deprecated arcade-only pathways.
+- finalize gravity/buoyancy contracts and remove deprecated legacy pathways.
 
 ## Acceptance Criteria
 

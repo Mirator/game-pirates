@@ -7,7 +7,8 @@ test-gated.
 
 Cross-spec dependency:
 
-- Spec 11 defines the phased gravity/buoyancy physics rollout.
+- Spec 11 defines the gravity/buoyancy physics foundation rollout.
+- Spec 12 defines the ship handling rollout and feel targets.
 
 ## Scope Traps To Avoid
 
@@ -26,7 +27,8 @@ Goal: establish coherent core physical behavior.
 Deliverables:
 
 - fixed-step gravity-based simulation.
-- ship rigid-body handling with buoyancy probes.
+- ship gravity/buoyancy foundation with buoyancy probes.
+- arcade-weighted planar handling layer (throttle/turn/boost) for control-first feel.
 - ballistic cannon projectiles with water/world collisions.
 - floating loot gravity-to-water lifecycle.
 - baseline collision layers and simplified colliders.
@@ -52,7 +54,7 @@ Deliverables:
 - differentiated ship class mass/inertia behavior.
 - improved debris/wreck handling.
 - expanded wave-sampling influence where enabled.
-- contract cleanup for finalized rigid-body-first pathways.
+- contract cleanup for finalized gravity-foundation + handling-controller pathways.
 
 ## Build-First Checklist
 

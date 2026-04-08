@@ -2,7 +2,7 @@
 
 Current browser prototype for the pirate game design:
 - stylized sea map with port marker and enemy spawns
-- gravity-based ship buoyancy physics, follow camera, and broadside cannon combat
+- gravity-based ship buoyancy physics with arcade-weighted handling, follow camera, and broadside cannon combat
 - ballistic cannonballs and floating loot object water interaction
 - enemy spawn director (mixed merchant/raider/navy archetypes with staggered pressure and active enemy caps)
 - loot drops (gold, cargo, repair materials, and treasure maps)
@@ -12,12 +12,12 @@ Current browser prototype for the pirate game design:
 
 ## Controls
 
-- `W` / `S`: accelerate / decelerate
-- `A` / `D`: turn left / right
+- `W` / `S` or `Arrow Up` / `Arrow Down`: accelerate / weak reverse + braking
+- `A` / `D` or `Arrow Left` / `Arrow Right`: turn left / right
 - `Q` / `E`: fire left / right batteries
 - `Space`: collect loot / dock / undock
 - `R`: consume repair material to repair hull (cooldown applies)
-- `Shift`: hold for temporary speed burst (cooldown applies)
+- `Shift`: hold for temporary speed burst (release ends burst, cooldown applies)
 - `Esc`: close dock menu
 - `F3`: toggle debug overlay
 

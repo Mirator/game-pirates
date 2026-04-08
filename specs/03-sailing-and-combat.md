@@ -7,27 +7,28 @@ model from Spec 11.
 
 Cross-spec dependency:
 
-- Spec 11 is the canonical authority for simulation-side force/buoyancy/collision
-  behavior.
+- Spec 11 is the canonical authority for gravity/buoyancy/collision foundations.
+- Spec 12 is the canonical authority for ship handling feel (throttle/turn/boost).
 
 ## Controls
 
-- W or S: forward/reverse thrust input.
-- A or D: turn torque input.
+- W/S or Arrow Up/Down: forward / weak reverse + braking input.
+- A/D or Arrow Left/Right: steering input.
 - Q or E: fire left or right broadside.
 - R: repair ship.
 - Space: interact, dock, or collect nearby loot.
-- Shift: temporary burst.
+- Shift: hold-to-boost burst (duration + cooldown).
 
 ## Sailing Model
 
-Physics-first handling requirements:
+Handling requirements:
 
-- Ship motion is force-driven with inertia.
-- Turning is torque-driven and should produce arc motion.
-- Buoyancy probes generate bob, pitch, and roll response.
-- Water drag and damping stabilize motion and prevent perpetual oscillation.
-- Player control remains responsive despite inertia.
+- Planar ship handling follows Spec 12 (arcade-weighted movement controller).
+- Gravity and buoyancy behavior follows Spec 11.
+- Buoyancy probes still generate bob, pitch, and roll response.
+- Water damping and assistance layers keep movement stable and readable.
+- Standing-still turning is intentionally very weak; players must move to aim.
+- Player control remains responsive with believable momentum.
 
 ### Motion Smoothness Requirements
 
@@ -57,6 +58,7 @@ Physics-first handling requirements:
 ## Combat Depth for MVP
 
 - Positioning and broadside angle matter.
+- Broadside alignment requires movement and speed management, not rotate-in-place.
 - Reload timing matters.
 - Range affects impact reliability due to ballistic drop.
 

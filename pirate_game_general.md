@@ -15,6 +15,7 @@ Use the spec index as the canonical source of truth.
 - [Ship Visual Representation Upgrade](specs/09-ship-visual-and-gameplay-representation-upgrade.md)
 - [Ship Wake Rendering System](specs/10-ship-wake-rendering-system.md)
 - [Gravity-Based Physics System](specs/11-gravity-based-physics-system.md)
+- [Player and Ship Movement System](specs/12-player-and-ship-movement-system.md)
 
 ## Working Title
 

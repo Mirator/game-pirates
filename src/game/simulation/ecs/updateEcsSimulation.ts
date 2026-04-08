@@ -34,16 +34,39 @@ import {
   LOOT_LIFETIME,
   LOOT_PICKUP_RADIUS,
   LOOT_WATER_DRAG,
+  MOVEMENT_ACCELERATION,
+  MOVEMENT_BRAKE_MULT,
+  MOVEMENT_DRAG,
+  MOVEMENT_HEADING_ASSIST,
+  MOVEMENT_LATERAL_DAMPING,
+  MOVEMENT_MAX_SPEED,
+  MOVEMENT_MAX_TURN_RATE,
+  MOVEMENT_REVERSE_ACCEL_MULT,
+  MOVEMENT_REVERSE_SPEED_MULT,
+  MOVEMENT_TURN_ACCEL,
+  MOVEMENT_TURN_HIGH_SPEED_MULT,
+  MOVEMENT_TURN_IDLE_ANGULAR_CAP,
+  MOVEMENT_TURN_IDLE_INPUT_MULT,
+  MOVEMENT_TURN_IDLE_SPEED_THRESHOLD,
+  MOVEMENT_TURN_LOW_SPEED_MULT,
+  MOVEMENT_TURN_MID_SPEED_END,
+  MOVEMENT_TURN_MID_SPEED_START,
   PLAYER_BURST_COOLDOWN,
   PLAYER_BURST_DURATION,
+  PLAYER_BURST_SPEED_MULTIPLIER,
+  PLAYER_BURST_TURN_MULTIPLIER,
   PLAYER_BURST_THRUST_MULTIPLIER,
   PLAYER_COLLISION_DAMAGE_MULTIPLIER,
   PLAYER_COLLISION_DAMAGE_THRESHOLD,
   PLAYER_REPAIR_AMOUNT,
   PLAYER_REPAIR_COOLDOWN,
   PLAYER_RESPAWN,
+  PROJECTILE_HIT_ANGULAR_IMPULSE,
   SHIP_SAFE_SUBMERGE_DEPTH,
   SHIP_SPAWN_FREEBOARD,
+  SHIP_COLLISION_ANGULAR_IMPULSE,
+  SHIP_COLLISION_IMPULSE_SCALE,
+  SHIP_COLLISION_RESTITUTION,
   SINK_DURATION,
   STORM_INTENSITY_MAX,
   STORM_RADIUS,
@@ -94,6 +117,7 @@ type EP = {
   massScale: number;
   thrustScale: number;
   turnScale: number;
+  speedScale: number;
   buoyancyScale: number;
 };
 
@@ -115,6 +139,7 @@ const EPF: Record<EnemyArchetype, EP> = {
     massScale: 0.95,
     thrustScale: 0.78,
     turnScale: 0.86,
+    speedScale: 0.9,
     buoyancyScale: 0.92
   },
   raider: {
@@ -130,6 +155,7 @@ const EPF: Record<EnemyArchetype, EP> = {
     massScale: 1,
     thrustScale: 1,
     turnScale: 1,
+    speedScale: 1,
     buoyancyScale: 1
   },
   navy: {
@@ -145,9 +171,46 @@ const EPF: Record<EnemyArchetype, EP> = {
     massScale: 1.25,
     thrustScale: 0.85,
     turnScale: 0.8,
+    speedScale: 0.88,
     buoyancyScale: 1.2
   }
 };
+
+function lerp(from: number, to: number, alpha: number): number {
+  return from + (to - from) * alpha;
+}
+
+function movementScalesFor(ship: ShipState): { accelerationScale: number; turnScale: number; speedScale: number } {
+  if (ship.owner === "player") {
+    return { accelerationScale: 1, turnScale: 1, speedScale: 1 };
+  }
+  const enemy = ship as EnemyState;
+  const profile = EPF[enemy.archetype];
+  return {
+    accelerationScale: profile.thrustScale,
+    turnScale: profile.turnScale,
+    speedScale: profile.speedScale
+  };
+}
+
+function frameDragFactor(baseDrag: number, dt: number): number {
+  const referenceStep = 1 / 60;
+  return Math.pow(baseDrag, dt / referenceStep);
+}
+
+function speedBandedTurnFactor(speedNorm: number): number {
+  const clampedSpeed = clamp(speedNorm, 0, 1);
+  if (clampedSpeed < MOVEMENT_TURN_MID_SPEED_START) {
+    const lowBandAlpha = MOVEMENT_TURN_MID_SPEED_START > 0 ? clampedSpeed / MOVEMENT_TURN_MID_SPEED_START : 1;
+    return lerp(MOVEMENT_TURN_LOW_SPEED_MULT, 1, clamp(lowBandAlpha, 0, 1));
+  }
+  if (clampedSpeed <= MOVEMENT_TURN_MID_SPEED_END) {
+    return 1;
+  }
+  const highBandWidth = Math.max(1e-4, 1 - MOVEMENT_TURN_MID_SPEED_END);
+  const highBandAlpha = clamp((clampedSpeed - MOVEMENT_TURN_MID_SPEED_END) / highBandWidth, 0, 1);
+  return lerp(1, MOVEMENT_TURN_HIGH_SPEED_MULT, highBandAlpha);
+}
 
 function emitEvent(worldState: WorldWithEcs, event: SimulationEvent): void {
   worldState.events.push(event);
@@ -204,29 +267,106 @@ function insideStorm(worldState: WorldWithEcs, ship: ShipState): boolean {
   );
 }
 
-function updateShipPhysics(worldState: WorldWithEcs, ship: ShipState, throttle: number, turn: number, dt: number, thrustScale = 1): void {
+function updateShipPhysics(
+  worldState: WorldWithEcs,
+  ship: ShipState,
+  throttle: number,
+  turn: number,
+  dt: number,
+  options: { boostActive?: boolean } = {}
+): void {
   if (ship.status !== "alive") return;
+
+  const boostActive = options.boostActive === true && ship.owner === "player";
+  const storm = insideStorm(worldState, ship);
+  const scales = movementScalesFor(ship);
+  const stormSpeedScale = storm ? STORM_SPEED_MULTIPLIER : 1;
+
   const f = forwardOf(ship.heading);
   const l = leftOf(ship.heading);
-  const storm = insideStorm(worldState, ship);
-  const thrust = ship.thrustForce * clamp(throttle, -1, 1) * thrustScale * (storm ? STORM_SPEED_MULTIPLIER : 1);
   const vx = ship.linearVelocity.x;
   const vz = ship.linearVelocity.z;
   const vy = ship.linearVelocity.y;
-  const fwdSpeed = vx * f.x + vz * f.z;
-  const latSpeed = vx * l.x + vz * l.z;
-  const planarSpeed = Math.hypot(vx, vz);
-  let fx = f.x * thrust - f.x * fwdSpeed * Math.abs(fwdSpeed) * ship.drag.linearWater - l.x * latSpeed * Math.abs(latSpeed) * ship.drag.lateralWater;
-  let fz = f.z * thrust - f.z * fwdSpeed * Math.abs(fwdSpeed) * ship.drag.linearWater - l.z * latSpeed * Math.abs(latSpeed) * ship.drag.lateralWater;
-  let fy = worldState.physics.gravity * ship.mass - vy * ship.buoyancyDamping;
+
+  const throttleInput = clamp(throttle, -1, 1);
   const turnInput = clamp(turn, -1, 1);
-  let yawT = turnInput * ship.turnTorque * clamp(ship.lowSpeedTurnAssist + (planarSpeed / 12) * (1 - ship.lowSpeedTurnAssist), 0.2, 1);
-  if (planarSpeed < 3) {
-    yawT += turnInput * ship.turnTorque * 1.0;
+
+  let forwardSpeed = vx * f.x + vz * f.z;
+  let lateralSpeed = vx * l.x + vz * l.z;
+
+  const acceleration =
+    MOVEMENT_ACCELERATION *
+    scales.accelerationScale *
+    stormSpeedScale *
+    (boostActive ? PLAYER_BURST_THRUST_MULTIPLIER : 1);
+  const turnScale = scales.turnScale * (boostActive ? PLAYER_BURST_TURN_MULTIPLIER : 1);
+  const maxSpeed =
+    MOVEMENT_MAX_SPEED *
+    scales.speedScale *
+    stormSpeedScale *
+    (boostActive ? PLAYER_BURST_SPEED_MULTIPLIER : 1);
+  const reverseSpeedCap = maxSpeed * MOVEMENT_REVERSE_SPEED_MULT;
+
+  if (throttleInput > 0) {
+    forwardSpeed += acceleration * throttleInput * dt;
+  } else if (throttleInput < 0) {
+    const reverseInput = -throttleInput;
+    forwardSpeed -= acceleration * MOVEMENT_REVERSE_ACCEL_MULT * reverseInput * dt;
+    if (forwardSpeed > 0) {
+      forwardSpeed -= acceleration * MOVEMENT_BRAKE_MULT * reverseInput * dt;
+    }
   }
-  if (turnInput !== 0 && Math.sign(turnInput) !== Math.sign(ship.angularVelocity) && Math.abs(ship.angularVelocity) > 0.001) {
-    yawT += -ship.angularVelocity * ship.mass * 2.5;
+
+  const dragFactor = frameDragFactor(MOVEMENT_DRAG, dt);
+  forwardSpeed *= dragFactor;
+  lateralSpeed *= dragFactor;
+
+  const lateralDampingAlpha = clamp(MOVEMENT_LATERAL_DAMPING * dt * 60, 0, 1);
+  lateralSpeed = lerp(lateralSpeed, 0, lateralDampingAlpha);
+
+  forwardSpeed = clamp(forwardSpeed, -reverseSpeedCap, maxSpeed);
+
+  const speedNorm = clamp(Math.abs(forwardSpeed) / Math.max(maxSpeed, 1e-4), 0, 1);
+  const turnFactor = speedBandedTurnFactor(speedNorm);
+  const idleTurn = speedNorm < MOVEMENT_TURN_IDLE_SPEED_THRESHOLD && Math.abs(throttleInput) < 0.1;
+  const idleTurnInputScale = idleTurn ? MOVEMENT_TURN_IDLE_INPUT_MULT : 1;
+  const targetTurnRate = turnInput * MOVEMENT_MAX_TURN_RATE * turnScale * turnFactor * idleTurnInputScale;
+  ship.angularVelocity = lerp(ship.angularVelocity, targetTurnRate, clamp(MOVEMENT_TURN_ACCEL * dt, 0, 1));
+
+  let planarVx = f.x * forwardSpeed + l.x * lateralSpeed;
+  let planarVz = f.z * forwardSpeed + l.z * lateralSpeed;
+  let planarSpeed = Math.hypot(planarVx, planarVz);
+
+  if (planarSpeed > maxSpeed) {
+    const speedClampScale = maxSpeed / Math.max(planarSpeed, 1e-5);
+    planarVx *= speedClampScale;
+    planarVz *= speedClampScale;
+    forwardSpeed *= speedClampScale;
+    lateralSpeed *= speedClampScale;
+    planarSpeed = maxSpeed;
   }
+
+  if (storm) {
+    const stormDamping = Math.exp(-1.4 * dt);
+    planarVx *= stormDamping;
+    planarVz *= stormDamping;
+    forwardSpeed *= stormDamping;
+    lateralSpeed *= stormDamping;
+    planarSpeed *= stormDamping;
+  }
+
+  if (planarSpeed > 0.2) {
+    const moveHeading = Math.atan2(planarVx, planarVz);
+    const headingDelta = normalizeAngle(moveHeading - ship.heading);
+    const assistWeight = turnInput === 0 ? 1 : 0.22 * turnFactor;
+    const assistRatio = clamp(Math.abs(lateralSpeed) / Math.max(0.5, Math.abs(forwardSpeed)), 0.18, 1);
+    ship.angularVelocity += headingDelta * MOVEMENT_HEADING_ASSIST * assistWeight * assistRatio;
+  }
+
+  const maxAngularVelocity = idleTurn ? MOVEMENT_TURN_IDLE_ANGULAR_CAP : MOVEMENT_MAX_TURN_RATE * turnScale * 1.35;
+  ship.angularVelocity = clamp(ship.angularVelocity, -maxAngularVelocity, maxAngularVelocity);
+
+  let fy = worldState.physics.gravity * ship.mass - vy * ship.buoyancyDamping;
   let pitchT = -ship.pitchVelocity * ship.drag.pitchDamping * ship.mass;
   let rollT = -ship.rollVelocity * ship.drag.rollDamping * ship.mass;
 
@@ -244,45 +384,40 @@ function updateShipPhysics(worldState: WorldWithEcs, ship: ShipState, throttle: 
     pitchT += b * probe.localOffset.z * 0.03;
     rollT += -b * probe.localOffset.x * 0.03;
   }
+
   if (submerged === 0 && ship.position.y > seaHeight(worldState, ship.position.x, ship.position.z) + 0.2) ship.waterState = "airborne";
   else if (submerged < Math.max(1, Math.floor(ship.buoyancyProbes.length * 0.5))) ship.waterState = "water_entry";
   else ship.waterState = "submerged";
-  if (storm) {
-    fx *= 0.9;
-    fz *= 0.9;
-  }
 
   const invM = 1 / Math.max(1, ship.mass);
-  ship.linearVelocity.x += fx * invM * dt;
+  ship.linearVelocity.x = planarVx;
+  ship.linearVelocity.z = planarVz;
   ship.linearVelocity.y += fy * invM * dt;
-  ship.linearVelocity.z += fz * invM * dt;
-  if (storm) {
-    const stormDamping = Math.exp(-1.4 * dt);
-    ship.linearVelocity.x *= stormDamping;
-    ship.linearVelocity.z *= stormDamping;
-  }
-  ship.angularVelocity += (yawT * invM - ship.angularVelocity * ship.drag.angularWater) * dt;
   ship.pitchVelocity += pitchT * invM * dt;
   ship.rollVelocity += rollT * invM * dt;
+
   ship.heading = normalizeAngle(ship.heading + ship.angularVelocity * dt);
   ship.pitch = clamp(ship.pitch + ship.pitchVelocity * dt, -0.36, 0.36);
   ship.roll = clamp(ship.roll + ship.rollVelocity * dt, -0.42, 0.42);
   ship.pitch += (-ship.pitch) * clamp(dt * 0.8, 0, 1);
   ship.roll += (-ship.roll) * clamp(dt * 0.85, 0, 1);
+
   ship.position.x += ship.linearVelocity.x * dt;
   ship.position.y = clamp(ship.position.y + ship.linearVelocity.y * dt, -8, 6);
   ship.position.z += ship.linearVelocity.z * dt;
+
   const centerWaterHeight = seaHeight(worldState, ship.position.x, ship.position.z);
   const minSafeHeight = centerWaterHeight - SHIP_SAFE_SUBMERGE_DEPTH;
   if (ship.position.y < minSafeHeight) {
     ship.position.y = minSafeHeight;
     ship.linearVelocity.y = Math.max(ship.linearVelocity.y, -0.35);
   }
+
   const af = forwardOf(ship.heading);
   const al = leftOf(ship.heading);
   ship.speed = ship.linearVelocity.x * af.x + ship.linearVelocity.z * af.z;
   ship.drift = ship.linearVelocity.x * al.x + ship.linearVelocity.z * al.z;
-  ship.throttle = clamp(throttle, -1, 1);
+  ship.throttle = throttleInput;
   ship.turnInput = turnInput;
   ship.buoyancyLoss = clamp((1 - ship.hp / Math.max(1, ship.maxHp)) * 0.5, 0, 0.5);
 }
@@ -437,10 +572,10 @@ function enemyIntent(worldState: WorldWithEcs, enemy: EnemyState, dt: number): E
     const r = (33 + (enemy.id % 4) * 5) * WORLD_LAYOUT_SCALE;
     const tx = Math.cos(enemy.patrolAngle) * r;
     const tz = Math.sin(enemy.patrolAngle) * r;
-    throttle = enemy.archetype === "navy" ? 0.44 : 0.58;
+    throttle = enemy.archetype === "navy" ? 0.38 : 0.5;
     turn = steeringTowardHeading(enemy.heading, Math.atan2(tx - enemy.position.x, tz - enemy.position.z));
   } else if (enemy.aiState === "detect") {
-    throttle = 0.35;
+    throttle = 0.28;
     turn = steeringTowardHeading(enemy.heading, Math.atan2(dx, dz));
   } else {
     const angleToPlayer = Math.atan2(dx, dz);
@@ -448,10 +583,10 @@ function enemyIntent(worldState: WorldWithEcs, enemy: EnemyState, dt: number): E
     const br = normalizeAngle(angleToPlayer - Math.PI * 0.5);
     const target = Math.abs(normalizeAngle(bl - enemy.heading)) < Math.abs(normalizeAngle(br - enemy.heading)) ? bl : br;
     if (enemy.aiState === "chase") {
-      throttle = enemy.archetype === "navy" ? 0.98 : 0.9;
+      throttle = enemy.archetype === "navy" ? 0.72 : 0.82;
       turn = steeringTowardHeading(enemy.heading, Math.atan2(dx, dz));
     } else {
-      throttle = dist > profile.broadsideRange * 1.1 ? 0.52 : dist < profile.broadsideRange * 0.72 ? -0.28 : 0.08;
+      throttle = dist > profile.broadsideRange * 1.1 ? 0.4 : dist < profile.broadsideRange * 0.72 ? -0.2 : 0.06;
       turn = steeringTowardHeading(enemy.heading, target);
       const len = Math.hypot(dx, dz);
       if (len > 0.0001) {
@@ -585,8 +720,15 @@ function collideShipWithIsland(worldState: WorldWithEcs, ecs: EcsState, ship: Sh
     ship.position.z += nz * pen;
     const nv = ship.linearVelocity.x * nx + ship.linearVelocity.z * nz;
     if (nv < 0) {
-      ship.linearVelocity.x += nx * (-(1 + 0.06) * nv);
-      ship.linearVelocity.z += nz * (-(1 + 0.06) * nv);
+      ship.linearVelocity.x += nx * (-(1 + SHIP_COLLISION_RESTITUTION) * nv);
+      ship.linearVelocity.z += nz * (-(1 + SHIP_COLLISION_RESTITUTION) * nv);
+      const tangentSpeed = ship.linearVelocity.x * -nz + ship.linearVelocity.z * nx;
+      const angularKick = clamp(
+        (tangentSpeed / Math.max(1, ship.mass)) * SHIP_COLLISION_ANGULAR_IMPULSE * 0.7,
+        -SHIP_COLLISION_ANGULAR_IMPULSE,
+        SHIP_COLLISION_ANGULAR_IMPULSE
+      );
+      ship.angularVelocity += angularKick;
       shipImpactDamage(worldState, ecs, ship, Math.abs(nv));
     }
   }
@@ -613,13 +755,21 @@ function collideShips(worldState: WorldWithEcs, ecs: EcsState, a: ShipState, b: 
   const rvz = a.linearVelocity.z - b.linearVelocity.z;
   const rvn = rvx * nx + rvz * nz;
   if (rvn > 0) return;
-  const j = (-(1 + 0.06) * rvn * 0.72) / inv;
+  const j = (-(1 + SHIP_COLLISION_RESTITUTION) * rvn * SHIP_COLLISION_IMPULSE_SCALE) / inv;
   const ix = j * nx;
   const iz = j * nz;
   a.linearVelocity.x += ix * invA;
   a.linearVelocity.z += iz * invA;
   b.linearVelocity.x -= ix * invB;
   b.linearVelocity.z -= iz * invB;
+  const rvTangent = rvx * -nz + rvz * nx;
+  const angularKick = clamp(
+    rvTangent * SHIP_COLLISION_ANGULAR_IMPULSE * 0.02,
+    -SHIP_COLLISION_ANGULAR_IMPULSE,
+    SHIP_COLLISION_ANGULAR_IMPULSE
+  );
+  a.angularVelocity += angularKick;
+  b.angularVelocity -= angularKick;
   shipImpactDamage(worldState, ecs, a, Math.abs(rvn));
   shipImpactDamage(worldState, ecs, b, Math.abs(rvn));
 }
@@ -686,7 +836,12 @@ function projectileSystem(worldState: WorldWithEcs, ecs: EcsState, dt: number): 
         const imp = p.impactImpulse / Math.max(1, e.mass);
         e.linearVelocity.x += (p.velocity.x / len) * imp;
         e.linearVelocity.z += (p.velocity.z / len) * imp;
-        e.angularVelocity += (p.velocity.x * p.velocity.z > 0 ? 1 : -1) * 0.08 / e.mass;
+        const angularKick = clamp(
+          ((p.velocity.x * p.velocity.z > 0 ? 1 : -1) * PROJECTILE_HIT_ANGULAR_IMPULSE) / Math.max(1, e.mass),
+          -PROJECTILE_HIT_ANGULAR_IMPULSE,
+          PROJECTILE_HIT_ANGULAR_IMPULSE
+        );
+        e.angularVelocity += angularKick;
         damageEnemy(worldState, ecs, e, CANNON_DAMAGE);
         break;
       }
@@ -793,22 +948,41 @@ function updateBurst(worldState: WorldWithEcs, inputState: InputState, dt: numbe
   const oldCd = b.cooldown;
   b.cooldown = Math.max(0, b.cooldown - dt);
   if (oldCd > 0 && b.cooldown === 0) emitEvent(worldState, { type: "burst_ready" });
-  if (worldState.player.status !== "alive" || worldState.port.menuOpen) {
+
+  const stopBurst = (startCooldown: boolean): void => {
+    if (!b.active) {
+      return;
+    }
     b.active = false;
     b.remaining = 0;
+    if (startCooldown) {
+      b.cooldown = Math.max(b.cooldown, PLAYER_BURST_COOLDOWN);
+    }
+  };
+
+  if (worldState.player.status !== "alive" || worldState.port.menuOpen) {
+    stopBurst(true);
     return;
   }
-  if (b.active) {
-    b.remaining = Math.max(0, b.remaining - dt);
-    if (b.remaining <= 0) {
-      b.active = false;
-      b.cooldown = PLAYER_BURST_COOLDOWN;
-    }
-  }
+
   if (!b.active && inputState.burst && b.cooldown <= 0) {
     b.active = true;
     b.remaining = PLAYER_BURST_DURATION;
     emitEvent(worldState, { type: "burst_started" });
+  }
+
+  if (!b.active) {
+    return;
+  }
+
+  if (!inputState.burst) {
+    stopBurst(true);
+    return;
+  }
+
+  b.remaining = Math.max(0, b.remaining - dt);
+  if (b.remaining <= 0) {
+    stopBurst(true);
   }
 }
 
@@ -1067,7 +1241,9 @@ export function updateEcsSimulation(worldState: WorldWithEcs, inputState: InputS
   intents.clear();
   for (const e of ecs.enemyTable.values()) intents.set(e.id, enemyIntent(worldState, e, dt));
   if (worldState.player.status === "alive") {
-    updateShipPhysics(worldState, worldState.player, inputState.throttle, inputState.turn, dt, worldState.burst.active ? PLAYER_BURST_THRUST_MULTIPLIER : 1);
+    updateShipPhysics(worldState, worldState.player, inputState.throttle, inputState.turn, dt, {
+      boostActive: worldState.burst.active
+    });
     keepInBounds(worldState, worldState.player, true);
   }
   for (const e of ecs.enemyTable.values()) {
