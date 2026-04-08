@@ -6,6 +6,8 @@ import {
   ENEMY_STAGGER_SPAWN_DELAY,
   FIXED_TIME_STEP,
   PORT_POSITION,
+  SHIP_SAFE_SUBMERGE_DEPTH,
+  SHIP_SPAWN_FREEBOARD,
   SINK_DURATION,
   createInitialWorldState,
   tryPurchaseHullUpgrade,
@@ -16,6 +18,8 @@ import {
   type ProjectileState,
   type WorldState
 } from ".";
+import { DEFAULT_WATER_SURFACE_TUNING, DEFAULT_WATER_SURFACE_WAVES } from "../physics/waterProfile";
+import { sampleWaterHeight } from "../physics/waterSurface";
 
 const neutralInput: InputState = {
   throttle: 0,
@@ -100,7 +104,19 @@ function quietWorld(worldState: WorldState): void {
   worldState.storm.active = false;
 }
 
+function seaHeightAt(worldState: WorldState, x: number, z: number): number {
+  return worldState.physics.seaLevel + sampleWaterHeight(DEFAULT_WATER_SURFACE_WAVES, { x, z }, worldState.time, DEFAULT_WATER_SURFACE_TUNING);
+}
+
 describe("updateSimulation ECS pipeline", () => {
+  it("starts player spawn above local waterline freeboard", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    const waterAtSpawn = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
+    expect(worldState.player.position.y).toBeGreaterThanOrEqual(waterAtSpawn + SHIP_SPAWN_FREEBOARD - 1e-6);
+  });
+
   it("integrates movement and preserves reload gating", () => {
     const worldState = createInitialWorldState();
     quietWorld(worldState);
@@ -320,8 +336,25 @@ describe("updateSimulation ECS pipeline", () => {
     expect(worldState.player.status).toBe("alive");
     expect(worldState.flags.playerRespawns).toBe(1);
     expect(worldState.player.hp).toBe(worldState.player.maxHp);
+    const waterAtRespawn = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
+    expect(worldState.player.position.y).toBeGreaterThanOrEqual(waterAtRespawn + SHIP_SPAWN_FREEBOARD - 1e-6);
     expect(elapsed).toBeGreaterThanOrEqual(SINK_DURATION);
     expect(elapsed - SINK_DURATION).toBeLessThanOrEqual(FIXED_TIME_STEP + 1e-6);
+  });
+
+  it("keeps alive ships from remaining deeply submerged after spawn", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    const waterAtPlayer = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
+    worldState.player.position.y = waterAtPlayer - 5;
+    worldState.player.linearVelocity.y = -3;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+
+    const waterAfterStep = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
+    expect(worldState.player.position.y).toBeGreaterThanOrEqual(waterAfterStep - SHIP_SAFE_SUBMERGE_DEPTH - 1e-6);
+    expect(worldState.player.linearVelocity.y).toBeGreaterThanOrEqual(-0.35 - 1e-6);
   });
 
   it("collects loot with interact before docking when both are possible", () => {

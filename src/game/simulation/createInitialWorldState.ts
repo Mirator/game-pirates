@@ -41,6 +41,7 @@ import {
   PORT_SAFE_RADIUS,
   SHIP_CENTER_OF_MASS_Y,
   SHIP_MAX_HP,
+  SHIP_SPAWN_FREEBOARD,
   SHIP_RADIUS,
   STORM_INTENSITY_MAX,
   STORM_RADIUS,
@@ -49,6 +50,8 @@ import {
   WORLD_BOUNDS_RADIUS
 } from "./constants";
 import type { BuoyancyProbeState, IslandState, ShipOwner, ShipState, WorldState } from "./types";
+import { DEFAULT_WATER_SURFACE_TUNING, DEFAULT_WATER_SURFACE_WAVES } from "../physics/waterProfile";
+import { sampleWaterHeight } from "../physics/waterSurface";
 
 function createBuoyancyProbes(length: number, width: number): BuoyancyProbeState[] {
   const halfLength = length * 0.5;
@@ -127,6 +130,11 @@ function createIslands(): IslandState[] {
   }));
 }
 
+function resolveSpawnHeight(x: number, z: number, fallbackY: number): number {
+  const waterHeight = PHYSICS_SEA_LEVEL + sampleWaterHeight(DEFAULT_WATER_SURFACE_WAVES, { x, z }, 0, DEFAULT_WATER_SURFACE_TUNING);
+  return Math.max(fallbackY, waterHeight + SHIP_SPAWN_FREEBOARD);
+}
+
 export function createInitialWorldState(): WorldState {
   const islands = createIslands();
   const treasureMarkerIsland = islands.find((island) => island.kind === "treasure") ?? islands[0];
@@ -140,6 +148,10 @@ export function createInitialWorldState(): WorldState {
   const stormCenterPosition = stormCenterIsland
     ? { x: stormCenterIsland.position.x, z: stormCenterIsland.position.z }
     : { x: PORT_POSITION.x, z: PORT_POSITION.z };
+  const playerSpawn = {
+    ...PLAYER_RESPAWN,
+    y: resolveSpawnHeight(PLAYER_RESPAWN.x, PLAYER_RESPAWN.z, PLAYER_RESPAWN.y)
+  };
 
   return {
     time: 0,
@@ -161,7 +173,7 @@ export function createInitialWorldState(): WorldState {
     nextProjectileId: 1,
     nextEnemyId: 1,
     nextLootId: 1,
-    player: createShip("player", PLAYER_RESPAWN),
+    player: createShip("player", playerSpawn),
     islands,
     enemies: [],
     projectiles: [],

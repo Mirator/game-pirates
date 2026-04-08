@@ -42,6 +42,8 @@ import {
   PLAYER_REPAIR_AMOUNT,
   PLAYER_REPAIR_COOLDOWN,
   PLAYER_RESPAWN,
+  SHIP_SAFE_SUBMERGE_DEPTH,
+  SHIP_SPAWN_FREEBOARD,
   SINK_DURATION,
   STORM_INTENSITY_MAX,
   STORM_RADIUS,
@@ -155,6 +157,10 @@ function seaHeight(worldState: WorldWithEcs, x: number, z: number): number {
   return worldState.physics.seaLevel + sampleWaterHeight(DEFAULT_WATER_SURFACE_WAVES, { x, z }, worldState.time, DEFAULT_WATER_SURFACE_TUNING);
 }
 
+function resolveShipSpawnHeight(worldState: WorldWithEcs, x: number, z: number, fallbackY: number): number {
+  return Math.max(fallbackY, seaHeight(worldState, x, z) + SHIP_SPAWN_FREEBOARD);
+}
+
 function setDamageState(ship: ShipState): void {
   if (ship.status === "sinking") {
     ship.damageState = "sunk";
@@ -266,6 +272,12 @@ function updateShipPhysics(worldState: WorldWithEcs, ship: ShipState, throttle: 
   ship.position.x += ship.linearVelocity.x * dt;
   ship.position.y = clamp(ship.position.y + ship.linearVelocity.y * dt, -8, 6);
   ship.position.z += ship.linearVelocity.z * dt;
+  const centerWaterHeight = seaHeight(worldState, ship.position.x, ship.position.z);
+  const minSafeHeight = centerWaterHeight - SHIP_SAFE_SUBMERGE_DEPTH;
+  if (ship.position.y < minSafeHeight) {
+    ship.position.y = minSafeHeight;
+    ship.linearVelocity.y = Math.max(ship.linearVelocity.y, -0.35);
+  }
   const af = forwardOf(ship.heading);
   const al = leftOf(ship.heading);
   ship.speed = ship.linearVelocity.x * af.x + ship.linearVelocity.z * af.z;
@@ -318,13 +330,13 @@ function chooseSpawnPoint(worldState: WorldWithEcs): { x: number; z: number; hea
   return best;
 }
 
-function createEnemy(id: number, archetype: EnemyArchetype, s: { x: number; z: number; heading: number }): EnemyState {
+function createEnemy(worldState: WorldWithEcs, id: number, archetype: EnemyArchetype, s: { x: number; z: number; heading: number }): EnemyState {
   const p = EPF[archetype];
   return {
     id,
     archetype,
     owner: "enemy",
-    position: { x: s.x, y: 0.18, z: s.z },
+    position: { x: s.x, y: resolveShipSpawnHeight(worldState, s.x, s.z, 0.18), z: s.z },
     heading: s.heading,
     pitch: 0,
     roll: 0,
@@ -375,7 +387,7 @@ function createEnemy(id: number, archetype: EnemyArchetype, s: { x: number; z: n
 function spawnEnemy(worldState: WorldWithEcs, ecs: EcsState, archetype: EnemyArchetype, spawn = chooseSpawnPoint(worldState)): void {
   if (ecs.enemyTable.size >= ENEMY_HARD_CAP) return;
   const id = worldState.nextEnemyId++;
-  const e = createEnemy(id, archetype, spawn);
+  const e = createEnemy(worldState, id, archetype, spawn);
   ecs.enemyTable.set(id, e);
   ecs.shipTable.set(id, e);
 }
@@ -815,8 +827,8 @@ function updateSinking(worldState: WorldWithEcs, ecs: EcsState, dt: number): voi
     p.pitch = clamp(p.pitch + p.pitchVelocity * dt, -0.8, 0.8);
     if (p.sinkTimer <= 0) {
       p.position.x = PLAYER_RESPAWN.x;
-      p.position.y = PLAYER_RESPAWN.y;
       p.position.z = PLAYER_RESPAWN.z;
+      p.position.y = resolveShipSpawnHeight(worldState, p.position.x, p.position.z, PLAYER_RESPAWN.y);
       p.heading = PLAYER_RESPAWN.heading;
       p.pitch = 0;
       p.roll = 0;
