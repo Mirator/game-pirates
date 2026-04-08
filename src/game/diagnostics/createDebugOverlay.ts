@@ -29,7 +29,7 @@ function formatSeconds(value: number): string {
 
 export function createDebugOverlay(root: HTMLElement, target: Window = window): DebugOverlay {
   const panel = document.createElement("div");
-  panel.setAttribute("aria-label", "Phase 1 debug readout");
+  panel.setAttribute("aria-label", "Debug readout");
   panel.style.position = "fixed";
   panel.style.top = "10px";
   panel.style.left = "10px";

@@ -33,10 +33,10 @@ Long-term optional systems:
 Third-person follow camera behind ship:
 - Slightly elevated view.
 - Modest zoom-out at higher speed.
-- Subtle shake on cannon fire or damage.
 - Smooth follow behavior.
 
 Future additions:
+- Subtle shake on cannon fire or damage.
 - Spyglass zoom.
 - Cinematic camera mode.
 - Photo mode.
@@ -57,7 +57,11 @@ Menus include:
 - Pause menu.
 - Port shop.
 - Upgrade menu.
-- Map or treasure screen.
+- Onboarding or briefing menu.
+
+Future optional menus:
+- Dedicated map screen.
+- Dedicated treasure screen.
 
 UI rule:
 - Keep screens compact and readable with minimal text clutter.

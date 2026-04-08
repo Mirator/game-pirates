@@ -171,9 +171,11 @@ Recommended texture inputs:
 
 Wake must affect the water appearance underneath it.
 
-Minimum viable approach:
-- Water shader samples wake influence and adds altered normal intensity,
-  brightness/foam tint shift, and subtle directional distortion.
+MVP shipping approach:
+- Keep a separate wake ribbon mesh for primary visual readability.
+- Feed wake influence into the water shader when a custom water shader is
+  available, adding altered normal intensity, brightness/foam tint shift, and
+  subtle directional distortion.
 
 If direct shader integration is not available:
 - Render wake ribbon with shading tuned to match ocean colors/lighting as
@@ -334,8 +336,9 @@ Approach options:
 - Option B: disturbance texture/mask.
 
 Recommendation:
-- MVP: separate wake ribbon mesh.
-- Next step: local shader distortion near stern.
+- MVP: separate wake ribbon mesh plus local shader wake influence where
+  available.
+- Next step: richer local distortion and tuning near stern/trail.
 - Advanced: disturbance field texture.
 
 ## 6. Performance Requirements
@@ -387,8 +390,7 @@ Disturbance:
 ## 8. Quality Levels
 
 Low:
-- stern patch only.
-- short ribbon.
+- stern patch + short ribbon.
 - no shader disturbance.
 - no spray.
 

@@ -154,7 +154,7 @@ test("smoke: onboarding, pause flow, esc precedence, combat, and responsive hud"
   const pauseMenu = page.locator("[data-testid='pause-menu']");
   const onboardingMenu = page.locator("[data-testid='onboarding-menu']");
   const replayTutorial = page.locator("[data-testid='replay-tutorial']");
-  const debug = page.locator("[aria-label='Phase 1 debug readout']");
+  const debug = page.locator("[aria-label='Debug readout']");
 
   await expect(canvas).toBeVisible();
   await expect(hudPrimary).toBeVisible();

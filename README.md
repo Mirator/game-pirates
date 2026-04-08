@@ -1,10 +1,10 @@
-# Blackwake Isles - Phase 2 First Playable
+# Blackwake Isles Browser Prototype
 
-Phase 2 browser prototype for the pirate game design:
+Current browser prototype for the pirate game design:
 - stylized sea map with port marker and enemy spawns
 - gravity-based ship buoyancy physics, follow camera, and broadside cannon combat
 - ballistic cannonballs and floating loot object water interaction
-- enemy spawn director (up to 2 active raiders with staggered pressure)
+- enemy spawn director (mixed merchant/raider/navy archetypes with staggered pressure and active enemy caps)
 - loot drops (gold, cargo, repair materials, and treasure maps)
 - dock interaction + upgrade menu (Hull Reinforcement)
 - HUD with minimap, resources, reload timers, objective and prompts

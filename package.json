@@ -1,7 +1,7 @@
 {
   "name": "game-pirates",
   "version": "1.0.0",
-  "description": "Blackwake Isles - Phase 1 prototype",
+  "description": "Blackwake Isles browser prototype",
   "type": "module",
   "scripts": {
     "dev": "vite",
