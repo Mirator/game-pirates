@@ -4,7 +4,7 @@ import { createShipDefinition, createShipMesh, type ShipVisualRole } from "./cre
 
 function getDimensions(role: ShipVisualRole): Vector3 {
   const visual = createShipMesh(createShipDefinition(role));
-  const box = new Box3().setFromObject(visual.group);
+  const box = new Box3().setFromObject(visual.presentation);
   return box.getSize(new Vector3());
 }
 
@@ -24,8 +24,12 @@ describe("createShipMesh ship factory", () => {
       expect(ship.getObjectByName("ship-mast")).toBeTruthy();
       expect(ship.getObjectByName("ship-sail")).toBeTruthy();
       expect(ship.getObjectByName("ship-flag")).toBeTruthy();
+      expect(ship.getObjectByName("ship-contact-shadow")).toBeTruthy();
+      expect(ship.getObjectByName("ship-contact-patch")).toBeTruthy();
       expect(ship.getObjectByName("ship-wake-trail")).toBeTruthy();
       expect(ship.getObjectByName("ship-wake-foam")).toBeTruthy();
+      expect(visual.presentation.name).toBe("ship-presentation");
+      expect(visual.sails.length).toBeGreaterThanOrEqual(1);
       expect(visual.cannonMounts.left.length).toBe(definition.silhouette.cannonMountsPerSide);
       expect(visual.cannonMounts.right.length).toBe(definition.silhouette.cannonMountsPerSide);
     }

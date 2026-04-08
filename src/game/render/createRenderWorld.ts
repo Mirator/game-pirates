@@ -16,7 +16,10 @@ import { createScene } from "./app/createScene";
 import { createEnvironment } from "./objects/createEnvironment";
 import { createShipDefinition, createShipMesh } from "./objects/createShipMesh";
 import { createShipWakeController, createWakeDebugSurface } from "./wake/createShipWakeController";
-import type { RenderBridgeState } from "./adapters/renderBridge";
+import {
+  createPlayerPresentationRuntimeState,
+  type RenderBridgeState
+} from "./adapters/renderBridge";
 
 export interface RenderWorld {
   scene: Scene;
@@ -160,6 +163,8 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
       turnRate: 0
     },
     enemyPoseCache: new Map(),
+    playerPresentationState: createPlayerPresentationRuntimeState(),
+    enemyPresentationStates: new Map(),
     playerFx: {
       hitFlashTimer: 0,
       muzzleLeftTimer: 0,
@@ -206,6 +211,7 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
       bridge.projectileMeshes.clear();
       bridge.lootMeshes.clear();
       bridge.enemyPoseCache.clear();
+      bridge.enemyPresentationStates.clear();
       bridge.enemyFx.clear();
       bridge.enemyLastHp.clear();
       bridge.knownProjectileOwners.clear();

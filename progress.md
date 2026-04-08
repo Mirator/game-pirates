@@ -92,3 +92,34 @@ review it all and fix root issue
 - `npm run test:e2e` passed (2/2).
 - `npm run build` passed.
 - Manual screenshot validation (`test-results/ship-readability-desktop.png`) confirms normal water/scene rendering.
+
+## Ship Presentation Rework (2026-04-08)
+- Implemented render-only ship presentation hierarchy with dedicated `ship-presentation` child under each ship root.
+- Added visual-only tilt system driven by yaw turn-rate + forward acceleration cues (smoothed, clamped):
+  - roll target from actual turn-rate (opposite lean direction).
+  - pitch target from forward speed delta (accel vs decel).
+  - subtle idle bob/noise layered on presentation node.
+- Added sail driver pipeline (`speedBlend`, `tension`, `sway`, `flutter`) with smoothed per-frame updates and bounded motion.
+- Added under-hull contact grounding visuals: `ship-contact-shadow` + `ship-contact-patch` (cheap textured radial falloff quads), with subtle scale/opacity modulation tied to motion.
+- Kept gameplay/simulation authority unchanged (gravity, buoyancy, handling, collisions, cannon logic).
+- Updated render runtime state with per-ship presentation caches; initialized for player/enemies and cleaned up on enemy despawn.
+- Updated specs: 03, 08, 09, 12, spec index, and root doc authority notes.
+
+## Verification (Ship Presentation Rework)
+- `npm run test` passed (75/75).
+- `npm run test:e2e` passed (2/2).
+- `npm run build` passed.
+
+
+## Contact/Wake Visual Fix (2026-04-08)
+- Addressed hard rectangular artifact under/behind ships by fixing alpha-map texture channel packing in createShipMesh texture generators.
+  - Previously alpha gradients were written to texture alpha channel only; Three.js alpha maps sample color channels, causing near-solid quads.
+  - Updated wake/contact alpha textures to write grayscale into RGB channels (alpha kept opaque).
+- Replaced contact shadow and contact patch from rectangular planes to radial ellipse decals (circle geometry + non-uniform scale).
+- Added lphaTest on contact materials to tighten soft-edge cutoff and remove residual box edges.
+- Verified visually using fresh e2e screenshot: 	est-results/ship-readability-desktop.png (artifact removed).
+- Validation: 
+pm run test, 
+pm run test:e2e, 
+pm run build all pass.
+

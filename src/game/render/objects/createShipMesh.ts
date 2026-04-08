@@ -10,6 +10,7 @@ import {
   Group,
   LinearFilter,
   Mesh,
+  MeshBasicMaterial,
   MeshStandardMaterial,
   PlaneGeometry,
   RGBAFormat,
@@ -77,9 +78,23 @@ export interface ShipMuzzleFx {
   smokeMaterial: MeshStandardMaterial;
 }
 
+export interface ShipSailVisual {
+  mesh: Mesh;
+  baseRotation: { x: number; y: number; z: number };
+  basePosition: Vector3;
+  baseScale: Vector3;
+  phaseOffset: number;
+}
+
 export interface ShipVisual {
   group: Group;
+  presentation: Group;
   definition: ShipDefinition;
+  sails: ShipSailVisual[];
+  contactShadow: Mesh;
+  contactShadowMaterial: MeshBasicMaterial;
+  contactPatch: Mesh;
+  contactPatchMaterial: MeshBasicMaterial;
   cannonMounts: {
     left: Vector3[];
     right: Vector3[];
@@ -394,10 +409,10 @@ function createWakeAlphaTexture(kind: "trail" | "foam"): DataTexture {
 
       const byte = Math.max(0, Math.min(255, Math.round(alpha * 255)));
       const idx = (y * size + x) * 4;
-      data[idx] = 255;
-      data[idx + 1] = 255;
-      data[idx + 2] = 255;
-      data[idx + 3] = byte;
+      data[idx] = byte;
+      data[idx + 1] = byte;
+      data[idx + 2] = byte;
+      data[idx + 3] = 255;
     }
   }
 
@@ -411,8 +426,57 @@ function createWakeAlphaTexture(kind: "trail" | "foam"): DataTexture {
   return texture;
 }
 
+function createContactAlphaTexture(innerStrength: number): DataTexture {
+  const size = 96;
+  const data = new Uint8Array(size * size * 4);
+  for (let y = 0; y < size; y += 1) {
+    const v = y / (size - 1);
+    for (let x = 0; x < size; x += 1) {
+      const u = x / (size - 1);
+      const dx = (u - 0.5) * 2;
+      const dy = (v - 0.5) * 2;
+      const radius = Math.hypot(dx, dy);
+      const edge = Math.max(0, 1 - Math.pow(radius, 1.55));
+      const alpha = Math.max(0, Math.min(1, edge * innerStrength));
+      const byte = Math.round(alpha * 255);
+      const idx = (y * size + x) * 4;
+      data[idx] = byte;
+      data[idx + 1] = byte;
+      data[idx + 2] = byte;
+      data[idx + 3] = 255;
+    }
+  }
+
+  const texture = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType);
+  texture.wrapS = ClampToEdgeWrapping;
+  texture.wrapT = ClampToEdgeWrapping;
+  texture.magFilter = LinearFilter;
+  texture.minFilter = LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function createContactMaterial(
+  color: string,
+  alphaMap: DataTexture,
+  opacity: number
+): MeshBasicMaterial {
+  return new MeshBasicMaterial({
+    color,
+    transparent: true,
+    opacity,
+    alphaMap,
+    alphaTest: 0.02,
+    depthWrite: false,
+    side: DoubleSide
+  });
+}
+
 const WAKE_TRAIL_ALPHA_TEXTURE = createWakeAlphaTexture("trail");
 const WAKE_FOAM_ALPHA_TEXTURE = createWakeAlphaTexture("foam");
+const CONTACT_SHADOW_ALPHA_TEXTURE = createContactAlphaTexture(1.0);
+const CONTACT_PATCH_ALPHA_TEXTURE = createContactAlphaTexture(0.78);
 
 function getBaseDefinition(role: ShipVisualRole): ShipDefinition {
   const style = ROLE_STYLES[role];
@@ -478,6 +542,10 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
     group.userData.assetFallback = "procedural-fallback";
   }
 
+  const presentation = new Group();
+  presentation.name = "ship-presentation";
+  group.add(presentation);
+
   const hullMaterial = createMaterial(palette.hull, { roughness: 0.8, metalness: 0.1 });
   const deckMaterial = createMaterial(palette.deck, { roughness: 0.88, metalness: 0.04 });
   const mastMaterial = createMaterial(palette.mast, { roughness: 0.86, metalness: 0.04 });
@@ -494,7 +562,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   );
   hull.name = "ship-hull";
   hull.position.y = silhouette.hullHeight * 0.58;
-  group.add(hull);
+  presentation.add(hull);
 
   const bow = enableShadows(
     new Mesh(
@@ -506,7 +574,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   bow.rotation.x = Math.PI * 0.5;
   bow.rotation.z = Math.PI;
   bow.position.set(0, silhouette.hullHeight * 0.56, silhouette.hullLength * 0.5 + silhouette.bowLength * 0.33);
-  group.add(bow);
+  presentation.add(bow);
 
   const stern = enableShadows(
     new Mesh(
@@ -517,7 +585,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   stern.name = "ship-stern";
   stern.rotation.x = Math.PI * 0.5;
   stern.position.set(0, silhouette.hullHeight * 0.52, -silhouette.hullLength * 0.5 - silhouette.sternLength * 0.28);
-  group.add(stern);
+  presentation.add(stern);
 
   const deck = enableShadows(
     new Mesh(
@@ -527,7 +595,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   );
   deck.name = "ship-deck";
   deck.position.set(0, silhouette.hullHeight * 1.18, silhouette.sailOffsetZ * 0.42);
-  group.add(deck);
+  presentation.add(deck);
 
   const mast = enableShadows(
     new Mesh(
@@ -542,7 +610,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   );
   mast.name = "ship-mast";
   mast.position.set(0, silhouette.hullHeight + silhouette.mastHeight * 0.5, silhouette.sailOffsetZ * 0.34);
-  group.add(mast);
+  presentation.add(mast);
 
   const sail = enableShadows(
     new Mesh(createSailGeometry(silhouette.sailShape, silhouette.sailWidth, silhouette.sailHeight), sailMaterial)
@@ -550,7 +618,21 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   sail.name = "ship-sail";
   sail.position.set(0, silhouette.sailOffsetY, silhouette.sailOffsetZ);
   sail.rotation.y = silhouette.sailShape === "lateen" ? Math.PI * 0.08 : 0;
-  group.add(sail);
+  presentation.add(sail);
+
+  const sails: ShipSailVisual[] = [
+    {
+      mesh: sail,
+      baseRotation: {
+        x: sail.rotation.x,
+        y: sail.rotation.y,
+        z: sail.rotation.z
+      },
+      basePosition: sail.position.clone(),
+      baseScale: sail.scale.clone(),
+      phaseOffset: 0
+    }
+  ];
 
   const flag = enableShadows(
     new Mesh(new PlaneGeometry(silhouette.flagWidth, silhouette.flagHeight), accentMaterial)
@@ -562,7 +644,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
     silhouette.sailOffsetZ
   );
   flag.rotation.y = definition.role === "player" ? -Math.PI * 0.12 : Math.PI * 0.17;
-  group.add(flag);
+  presentation.add(flag);
 
   const cannonMountsLeft: Vector3[] = [];
   const cannonMountsRight: Vector3[] = [];
@@ -590,7 +672,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
       mountY,
       zOffset
     );
-    group.add(leftMount);
+    presentation.add(leftMount);
     cannonMountsLeft.push(leftMount.position.clone());
 
     const rightMount = enableShadows(
@@ -611,7 +693,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
       mountY,
       zOffset
     );
-    group.add(rightMount);
+    presentation.add(rightMount);
     cannonMountsRight.push(rightMount.position.clone());
   }
 
@@ -683,19 +765,53 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   wakeSpray.visible = false;
   group.add(wakeSpray);
 
+  const contactShadowMaterial = createContactMaterial("#000000", CONTACT_SHADOW_ALPHA_TEXTURE, 0.27);
+  const contactShadow = new Mesh(
+    new CircleGeometry(1, 40),
+    contactShadowMaterial
+  );
+  contactShadow.name = "ship-contact-shadow";
+  contactShadow.rotation.x = -Math.PI * 0.5;
+  contactShadow.position.set(0, 0.028, 0);
+  contactShadow.scale.set(silhouette.hullWidth * 1.18, 1, silhouette.hullLength * 0.94);
+  contactShadow.renderOrder = 2;
+  contactShadow.userData.baseScaleX = contactShadow.scale.x;
+  contactShadow.userData.baseScaleZ = contactShadow.scale.z;
+  group.add(contactShadow);
+
+  const contactPatchMaterial = createContactMaterial("#0d2235", CONTACT_PATCH_ALPHA_TEXTURE, 0.16);
+  const contactPatch = new Mesh(
+    new CircleGeometry(1, 34),
+    contactPatchMaterial
+  );
+  contactPatch.name = "ship-contact-patch";
+  contactPatch.rotation.x = -Math.PI * 0.5;
+  contactPatch.position.set(0, 0.024, -silhouette.hullLength * 0.04);
+  contactPatch.scale.set(silhouette.hullWidth * 0.8, 1, silhouette.hullLength * 0.62);
+  contactPatch.renderOrder = 1;
+  contactPatch.userData.baseScaleX = contactPatch.scale.x;
+  contactPatch.userData.baseScaleZ = contactPatch.scale.z;
+  group.add(contactPatch);
+
   const muzzleLeft = createMuzzleFx("ship-muzzle-left", "left");
   muzzleLeft.group.position.set(-silhouette.hullWidth * 0.5 - 0.45, mountY + 0.05, 0);
-  group.add(muzzleLeft.group);
+  presentation.add(muzzleLeft.group);
 
   const muzzleRight = createMuzzleFx("ship-muzzle-right", "right");
   muzzleRight.group.position.set(silhouette.hullWidth * 0.5 + 0.45, mountY + 0.05, 0);
-  group.add(muzzleRight.group);
+  presentation.add(muzzleRight.group);
 
   const flashChannels = registerFlashChannels([hullMaterial, deckMaterial, sailMaterial, accentMaterial, cannonMaterial]);
 
   return {
     group,
+    presentation,
     definition,
+    sails,
+    contactShadow,
+    contactShadowMaterial,
+    contactPatch,
+    contactPatchMaterial,
     cannonMounts: {
       left: cannonMountsLeft,
       right: cannonMountsRight

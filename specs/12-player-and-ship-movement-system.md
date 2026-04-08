@@ -47,6 +47,9 @@ Cross-spec dependencies:
   and collision system foundations.
 - This spec is canonical for planar ship handling feel (throttle/turn/boost,
   speed-state response, lateral stabilization, heading assist).
+- Spec 09 consumes handling outputs (speed, turn rate, acceleration cues) for
+  render-only ship presentation feedback (tilt/sail/contact). Those visuals must
+  never feed back into gameplay handling authority.
 
 ## Camera and Readability Assumptions
 

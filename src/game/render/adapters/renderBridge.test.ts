@@ -4,6 +4,7 @@ import { createInitialWorldState, type EnemyState, type LootState, type Projecti
 import { createShipDefinition, createShipMesh } from "../objects/createShipMesh";
 import { createShipWakeController, createWakeDebugSurface } from "../wake/createShipWakeController";
 import {
+  createPlayerPresentationRuntimeState,
   syncRenderFromSimulation,
   type RenderBridgeState,
   type RenderInterpolationContext,
@@ -206,6 +207,8 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
       turnRate: 0
     },
     enemyPoseCache: new Map(),
+    playerPresentationState: createPlayerPresentationRuntimeState(),
+    enemyPresentationStates: new Map(),
     playerFx: {
       hitFlashTimer: 0,
       muzzleLeftTimer: 0,
@@ -330,9 +333,9 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     const bridge = createBridge(environmentSync);
 
     syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolationAlpha0);
-    const yAtAlpha0 = bridge.playerMesh.position.y;
+    const bobAtAlpha0 = bridge.playerVisual.presentation.position.y;
     syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolationAlpha1);
-    const yAtAlpha1 = bridge.playerMesh.position.y;
+    const bobAtAlpha1 = bridge.playerVisual.presentation.position.y;
 
     expect(environmentSync).toHaveBeenCalledTimes(2);
     const firstCall = environmentSync.mock.calls[0];
@@ -342,7 +345,7 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     expect(secondCall?.[1]?.renderTime).toBeCloseTo(worldState.time, 6);
     expect(secondCall?.[1]?.playerPose?.x).toBeCloseTo(worldState.player.position.x, 6);
     expect(secondCall?.[1]?.cameraPosition).toBeDefined();
-    expect(Math.abs(yAtAlpha1 - yAtAlpha0)).toBeGreaterThan(0.00004);
+    expect(Math.abs(bobAtAlpha1 - bobAtAlpha0)).toBeGreaterThan(0.00004);
   });
 
   it("tracks camera heading directly during small oscillations", () => {
@@ -438,12 +441,174 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     const bridge = createBridge(environmentSync);
     syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
 
-    expect(Math.abs(bridge.playerMesh.rotation.x)).toBeGreaterThan(0.02);
-    expect(Math.abs(bridge.playerMesh.rotation.z)).toBeGreaterThan(0.03);
+    expect(Math.abs(bridge.playerMesh.rotation.x)).toBeLessThan(1e-6);
+    expect(Math.abs(bridge.playerMesh.rotation.z)).toBeLessThan(1e-6);
+    expect(Math.abs(bridge.playerVisual.presentation.rotation.x)).toBeGreaterThan(0.01);
+    expect(Math.abs(bridge.playerVisual.presentation.rotation.z)).toBeGreaterThan(0.03);
+    expect(Math.abs(bridge.playerVisual.presentation.position.y)).toBeGreaterThan(0.001);
     const call = environmentSync.mock.calls.at(-1);
     const wakeInfluences = call?.[1]?.wakeInfluences as Array<{ intensity: number }> | undefined;
     expect((wakeInfluences?.length ?? 0)).toBeGreaterThan(0);
     expect(wakeInfluences?.[0]?.intensity ?? 0).toBeGreaterThan(0.05);
+  });
+
+  it("keeps tilt on presentation node and clamps roll range", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.speed = 30;
+    worldState.player.linearVelocity.z = 30;
+    worldState.player.heading = 0.8;
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    interpolation.previousSnapshot.player.heading = 0.1;
+
+    const bridge = createBridge();
+    for (let i = 0; i < 8; i += 1) {
+      worldState.time = i * (1 / 60);
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+
+    expect(Math.abs(bridge.playerMesh.rotation.x)).toBeLessThan(1e-6);
+    expect(Math.abs(bridge.playerMesh.rotation.z)).toBeLessThan(1e-6);
+    expect(Math.abs(bridge.playerVisual.presentation.rotation.z)).toBeLessThan(0.23);
+  });
+
+  it("leans opposite to turn direction from actual yaw rate", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.speed = 22;
+    worldState.player.linearVelocity.z = 22;
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    for (let i = 0; i < 10; i += 1) {
+      worldState.time = i * (1 / 60);
+      worldState.player.heading = 0.9;
+      interpolation.previousSnapshot.player.heading = 0.2;
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+    const positiveTurnRoll = bridge.playerVisual.presentation.rotation.z;
+
+    for (let i = 10; i < 24; i += 1) {
+      worldState.time = i * (1 / 60);
+      worldState.player.heading = 0.2;
+      interpolation.previousSnapshot.player.heading = 0.9;
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+    const negativeTurnRoll = bridge.playerVisual.presentation.rotation.z;
+
+    expect(positiveTurnRoll).toBeLessThan(0);
+    expect(negativeTurnRoll).toBeGreaterThan(0);
+  });
+
+  it("drives pitch from forward acceleration and deceleration", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.heading = 0;
+    worldState.player.speed = 0;
+    worldState.player.linearVelocity.x = 0;
+    worldState.player.linearVelocity.z = 0;
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    for (let i = 0; i < 8; i += 1) {
+      worldState.time = i * (1 / 60);
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+
+    worldState.player.speed = 28;
+    worldState.player.linearVelocity.z = 28;
+    worldState.time += 1 / 60;
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    const accelPitch = bridge.playerVisual.presentation.rotation.x;
+
+    worldState.player.speed = 0;
+    worldState.player.linearVelocity.z = 0;
+    worldState.time += 1 / 60;
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    const brakePitch = bridge.playerVisual.presentation.rotation.x;
+
+    expect(accelPitch).toBeLessThan(brakePitch);
+  });
+
+  it("updates sail tension/sway/flutter from speed and turn without popping", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.heading = 0;
+    worldState.player.speed = 2;
+    worldState.player.linearVelocity.z = 2;
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    for (let i = 0; i < 10; i += 1) {
+      worldState.time = i * (1 / 60);
+      interpolation.previousSnapshot.player.heading = 0;
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+    const sail = bridge.playerVisual.sails[0];
+    expect(sail).toBeDefined();
+    if (!sail) {
+      return;
+    }
+    const lowScaleX = sail.mesh.scale.x;
+    const lowRotX = sail.mesh.rotation.x;
+
+    worldState.player.speed = 34;
+    worldState.player.linearVelocity.z = 34;
+    for (let i = 10; i < 40; i += 1) {
+      worldState.time = i * (1 / 60);
+      worldState.player.heading = 0.8;
+      interpolation.previousSnapshot.player.heading = 0.15;
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+
+    const highScaleX = sail.mesh.scale.x;
+    const highRotX = sail.mesh.rotation.x;
+    const sailZAtHighTurn = sail.mesh.rotation.z;
+
+    worldState.player.heading = 0.8;
+    interpolation.previousSnapshot.player.heading = 0.8;
+    worldState.time += 1 / 60;
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    const sailZNextFrame = sail.mesh.rotation.z;
+
+    expect(highScaleX).toBeGreaterThan(lowScaleX);
+    expect(highRotX).toBeLessThan(lowRotX);
+    expect(Math.abs(sailZAtHighTurn)).toBeLessThan(0.35);
+    expect(Math.abs(sailZNextFrame - sailZAtHighTurn)).toBeLessThan(0.12);
+  });
+
+  it("keeps contact shadow grounded and scales/opacities subtly with motion", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.heading = 0;
+    worldState.player.speed = 0;
+    worldState.player.linearVelocity.z = 0;
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    for (let i = 0; i < 8; i += 1) {
+      worldState.time = i * (1 / 60);
+      interpolation.previousSnapshot.player.heading = 0;
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+    const lowOpacity = bridge.playerVisual.contactShadowMaterial.opacity;
+    const lowScale = bridge.playerVisual.contactShadow.scale.x;
+
+    worldState.player.speed = 36;
+    worldState.player.linearVelocity.z = 36;
+    for (let i = 8; i < 34; i += 1) {
+      worldState.time = i * (1 / 60);
+      worldState.player.heading = 0.7;
+      interpolation.previousSnapshot.player.heading = 0.1;
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+
+    const highOpacity = bridge.playerVisual.contactShadowMaterial.opacity;
+    const highScale = bridge.playerVisual.contactShadow.scale.x;
+    expect(bridge.playerVisual.contactShadow.position.y).toBeGreaterThan(0);
+    expect(highOpacity).toBeGreaterThan(lowOpacity);
+    expect(highScale).toBeGreaterThan(lowScale);
+    expect(highScale).toBeLessThan(lowScale * 1.22);
   });
 
   it("triggers hit flash on hp loss", () => {

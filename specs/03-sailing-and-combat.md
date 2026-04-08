@@ -25,6 +25,8 @@ Handling requirements:
 
 - Planar ship handling follows Spec 12 (arcade-weighted movement controller).
 - Gravity and buoyancy behavior follows Spec 11.
+- Render presentation feedback (tilt/sail/contact grounding) follows Spec 09 and
+  is non-authoritative.
 - Buoyancy probes still generate bob, pitch, and roll response.
 - Water damping and assistance layers keep movement stable and readable.
 - Standing-still turning is intentionally very weak; players must move to aim.
@@ -59,6 +61,8 @@ Handling requirements:
 
 - Positioning and broadside angle matter.
 - Broadside alignment requires movement and speed management, not rotate-in-place.
+- Visual tilt/sail cues improve readability but do not grant aiming authority by
+  themselves.
 - Reload timing matters.
 - Range affects impact reliability due to ballistic drop.
 

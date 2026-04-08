@@ -82,6 +82,10 @@ Notes:
 - Water does not require fully realistic shadowing for MVP.
 - Standard shadow maps are acceptable for MVP; cascaded shadows are optional.
 - Tune bias and normal bias to avoid acne and peter-panning.
+- Ships must also include a stable, cheap under-hull contact shadow/contact patch
+  cue (blob/decal/projection style) so hulls read as grounded on water even
+  under simple lighting. This layer is presentation-only and independent from
+  gameplay physics authority.
 
 ### 3) Ambient / Environment Lighting
 

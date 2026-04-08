@@ -16,6 +16,8 @@ Cross-spec dependencies:
 - Spec 08: Stylized Ocean Rendering (lighting/water compatibility).
 - Spec 10: Stylized Ship Wake Rendering System (wake architecture and tuning).
 - Spec 11: Gravity-Based Physics System (authoritative ship/projectile physics).
+- Spec 12: Player and Ship Movement System (authoritative handling outputs that
+  drive visual cues).
 
 V1 scope note:
 - Ship rendering uses procedural meshes for now.
@@ -115,6 +117,79 @@ Motion source contract:
 - Ship visual pose should consume simulation-authoritative physics state
   (position, heading, pitch, roll, velocity-derived cues), not independent fake
   locomotion.
+- Added tilt/sail/contact effects must be applied on render presentation nodes
+  only and must not write into gameplay authority.
+
+### 4.1 Tilt (Roll + Pitch)
+
+Ship tilt is a visual feedback layer that must communicate momentum without
+hurting readability.
+
+Required behavior:
+- roll is driven primarily by actual yaw turn rate (preferred) or normalized
+  turn input.
+- left turn leans hull slightly to the right, right turn leans slightly to the
+  left.
+- pitch is driven by longitudinal acceleration: accelerating lifts bow slightly,
+  decelerating lowers bow slightly.
+- apply smoothing (`lerp`/damp/spring) to avoid snapping and jitter.
+- include very small idle bob/noise so ship never feels perfectly rigid.
+
+MVP recommended bounds:
+- roll clamp: up to `8-12°` (default `10°`).
+- pitch clamp: up to `3-5°` (default `4°`).
+
+Authority boundary:
+- tilt is presentation-only in MVP.
+- tilt must not modify cannon logic, collision response, navigation, or
+  simulation state.
+
+### 4.2 Sail Behavior
+
+Sails must communicate speed and heading change even without wind simulation.
+
+Required behavior:
+- drive sail state from `speedFactor = currentSpeed / maxSpeed`.
+- low speed: looser/resting sail pose.
+- high speed: more open/tensioned sail pose.
+- turning adds subtle delayed sail sway.
+- add low-amplitude flutter/oscillation to avoid static presentation.
+- smooth all sail transitions to prevent popping on rapid speed changes.
+
+Recommended runtime driver values:
+- `speedBlend`
+- `tension`
+- `swayAngle`
+- `flutterOffset`
+
+Future-compat requirement:
+- multiple sails may share common driver values with slight per-sail phase
+  offsets.
+
+Authority boundary:
+- sail behavior is presentation-only in MVP.
+- sail animation must not alter thrust, drag, wind direction, or combat balance.
+
+### 4.3 Shadow + Contact Grounding
+
+Ships must read as physically grounded on water from gameplay camera distance.
+
+Required behavior:
+- stable blob/projection contact shadow under hull.
+- soft radial falloff; darkest near hull center.
+- subtle under-hull darkening/contact patch to reinforce water intersection.
+- contact layer follows ship and stays readable in all MVP lighting states.
+- opacity must be controllable independently from scene-light intensity.
+- solution should stay cheap (textured quad/decal/projected circle), not complex
+  dynamic shadowing.
+
+Tuning notes:
+- optional subtle scale modulation from tilt/bob is allowed.
+- modulation must remain stable and non-cartoonish.
+
+Authority boundary:
+- contact shadow/darkening are presentation-only.
+- no dependency on advanced water simulation or physical lighting models.
 
 ## 5. Interaction Feedback
 
@@ -179,5 +254,7 @@ class expansion.
 ### Gameplay
 
 - Ships visibly react to movement and turning.
+- Ships visibly show bounded tilt and sail response without visual snapping.
+- Ships appear grounded to water with stable under-hull contact cue.
 - Ships provide clear visual combat feedback.
 - Player can identify threats at distance.

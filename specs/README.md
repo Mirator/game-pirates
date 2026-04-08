@@ -28,3 +28,5 @@ to one or more spec files.
   projectile ballistics, and collision force behavior.
 - Treat Spec 12 as the canonical ship handling authority for throttle, turn,
   boost, speed states, drift control, and heading assist behavior.
+- Treat Spec 09 as the canonical ship presentation-feedback authority for
+  render-only tilt, sail animation, and water-contact grounding cues.

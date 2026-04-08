@@ -17,6 +17,11 @@ Use the spec index as the canonical source of truth.
 - [Gravity-Based Physics System](specs/11-gravity-based-physics-system.md)
 - [Player and Ship Movement System](specs/12-player-and-ship-movement-system.md)
 
+Authority split quick reference:
+- Spec 11: gravity/buoyancy/ballistics/collision force foundations.
+- Spec 12: planar movement handling feel (throttle/turn/boost/stabilization).
+- Spec 09: ship presentation feedback (render-only tilt/sail/contact grounding).
+
 ## Working Title
 
 Blackwake Isles
