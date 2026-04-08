@@ -1,4 +1,4 @@
-import { Mesh, Scene, ShaderMaterial, Vector3 } from "three";
+import { DoubleSide, Mesh, MeshStandardMaterial, Scene, ShaderMaterial, Vector3 } from "three";
 import { describe, expect, it } from "vitest";
 import { createInitialWorldState } from "../../simulation";
 import { createEnvironment } from "./createEnvironment";
@@ -34,6 +34,44 @@ describe("createEnvironment water quality controls", () => {
       const candidate = uniforms.uSunDirection?.value;
       if (candidate instanceof Vector3) {
         found = candidate.clone();
+      }
+    });
+    return found;
+  }
+
+  function findWaterMaterial(scene: Scene): ShaderMaterial | null {
+    let found: ShaderMaterial | null = null;
+    scene.traverse((obj) => {
+      if (found) {
+        return;
+      }
+      const mesh = obj as Mesh;
+      const material = mesh.material;
+      if (!(material instanceof ShaderMaterial)) {
+        return;
+      }
+      const uniforms = material.uniforms as Record<string, { value?: unknown }>;
+      if (uniforms.uDeepColor && uniforms.uShallowColor && uniforms.uNormalMapA && uniforms.uNormalMapB) {
+        found = material;
+      }
+    });
+    return found;
+  }
+
+  function findSkyMesh(scene: Scene): Mesh | null {
+    let found: Mesh | null = null;
+    scene.traverse((obj) => {
+      if (found) {
+        return;
+      }
+      const mesh = obj as Mesh;
+      const material = mesh.material;
+      if (!(material instanceof ShaderMaterial)) {
+        return;
+      }
+      const uniforms = material.uniforms as Record<string, { value?: unknown }>;
+      if (uniforms.uTopColor && uniforms.uHorizonColor && uniforms.uBottomColor && uniforms.uSunDirection) {
+        found = mesh;
       }
     });
     return found;
@@ -125,5 +163,83 @@ describe("createEnvironment water quality controls", () => {
     const environment = createEnvironment(scene);
     expect(() => environment.dispose()).not.toThrow();
     expect(() => environment.dispose()).not.toThrow();
+  });
+
+  it("renders water shader double-sided to prevent horizon culling voids", () => {
+    const scene = new Scene();
+    const environment = createEnvironment(scene);
+    sync(environment, createInitialWorldState());
+
+    const waterMaterial = findWaterMaterial(scene);
+    expect(waterMaterial).not.toBeNull();
+    if (!waterMaterial) {
+      return;
+    }
+
+    expect(waterMaterial.side).toBe(DoubleSide);
+  });
+
+  it("renders sky dome without depth-tested culling gaps", () => {
+    const scene = new Scene();
+    createEnvironment(scene);
+
+    const skyMesh = findSkyMesh(scene);
+    expect(skyMesh).not.toBeNull();
+    if (!skyMesh) {
+      return;
+    }
+
+    const skyMaterial = skyMesh.material;
+    if (!(skyMaterial instanceof ShaderMaterial)) {
+      return;
+    }
+
+    expect(skyMaterial.side).toBe(DoubleSide);
+    expect(skyMaterial.depthTest).toBe(false);
+    expect(skyMaterial.depthWrite).toBe(false);
+    expect((skyMesh.geometry as { parameters?: { radius?: number } }).parameters?.radius ?? 0).toBeLessThan(400);
+  });
+
+  it("keeps hostile island meshes readable without harsh shadow silhouettes", () => {
+    const scene = new Scene();
+    const environment = createEnvironment(scene);
+    const worldState = createInitialWorldState();
+    sync(environment, worldState);
+
+    const hostile = worldState.islands.find((island) => island.kind === "hostile");
+    expect(hostile).toBeDefined();
+    if (!hostile) {
+      return;
+    }
+
+    const nearbyIslandMeshes: Mesh[] = [];
+    const worldPosition = new Vector3();
+    scene.traverse((obj) => {
+      const mesh = obj as Mesh;
+      if (!mesh.isMesh || !(mesh.material instanceof MeshStandardMaterial)) {
+        return;
+      }
+      mesh.getWorldPosition(worldPosition);
+      const dx = worldPosition.x - hostile.position.x;
+      const dz = worldPosition.z - hostile.position.z;
+      if (dx * dx + dz * dz <= 20 * 20) {
+        nearbyIslandMeshes.push(mesh);
+      }
+    });
+
+    expect(nearbyIslandMeshes.length).toBeGreaterThan(0);
+    for (const mesh of nearbyIslandMeshes) {
+      expect(mesh.castShadow).toBe(false);
+      expect(mesh.receiveShadow).toBe(false);
+
+      const material = mesh.material;
+      if (!(material instanceof MeshStandardMaterial)) {
+        continue;
+      }
+
+      const luminance = material.color.r * 0.2126 + material.color.g * 0.7152 + material.color.b * 0.0722;
+      expect(luminance).toBeGreaterThan(0.12);
+      expect(material.emissiveIntensity).toBeGreaterThan(0.1);
+    }
   });
 });

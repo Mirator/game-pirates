@@ -1,5 +1,4 @@
 import {
-  BackSide,
   CircleGeometry,
   Color,
   ConeGeometry,
@@ -159,7 +158,7 @@ function getIslandPalette(kind: IslandKind): {
     case "treasure":
       return { sand: "#e0bc79", rock: "#537a62", accent: "#ffd84d" };
     case "hostile":
-      return { sand: "#9f8660", rock: "#5f4c42", accent: "#cb6651" };
+      return { sand: "#b89b72", rock: "#776255", accent: "#da8774" };
     case "scenic":
       return { sand: "#d4b78a", rock: "#5f8a6f", accent: "#7ed2a5" };
   }
@@ -167,37 +166,46 @@ function getIslandPalette(kind: IslandKind): {
 
 function createIslandMesh(island: IslandState): Group {
   const palette = getIslandPalette(island.kind);
+  const isHostile = island.kind === "hostile";
   const scale = island.radius / 10;
 
   const group = new Group();
 
   const sand = enableShadows(
     new Mesh(
-      new CircleGeometry(island.radius * 1.02, 20),
+      new CylinderGeometry(island.radius * 1.02, island.radius * 1.02, 0.18 * scale, 20),
       new MeshStandardMaterial({
         color: palette.sand,
+        emissive: palette.sand,
+        emissiveIntensity: isHostile ? 0.2 : 0.08,
         flatShading: true,
-        roughness: 0.9,
-        side: DoubleSide
+        roughness: 0.9
       })
-    )
+    ),
+    false,
+    false
   );
-  sand.rotation.x = -Math.PI * 0.5;
-  sand.position.y = 0.05;
+  sand.position.y = 0.09 * scale;
   group.add(sand);
 
+  const rockRadius = (isHostile ? 3.9 : 4.8) * scale;
+  const rockHeight = (isHostile ? 2.5 : 3.2) * scale;
   const rock = enableShadows(
     new Mesh(
-      new ConeGeometry(4.8 * scale, 3.2 * scale, 8),
+      new ConeGeometry(rockRadius, rockHeight, 8),
       new MeshStandardMaterial({
         color: palette.rock,
+        emissive: palette.rock,
+        emissiveIntensity: isHostile ? 0.2 : 0.08,
         flatShading: true,
         roughness: 0.95
       })
-    )
+    ),
+    false,
+    false
   );
   rock.rotation.y = Math.PI * 0.16;
-  rock.position.y = 1.48 * scale;
+  rock.position.y = (isHostile ? 1.26 : 1.48) * scale;
   group.add(rock);
 
   const markerHeight = island.kind === "port" ? 4.2 : 3.2;
@@ -208,11 +216,13 @@ function createIslandMesh(island: IslandState): Group {
       new MeshStandardMaterial({
         color: palette.accent,
         emissive: palette.accent,
-        emissiveIntensity: island.kind === "hostile" ? 0.08 : 0.13,
+        emissiveIntensity: island.kind === "hostile" ? 0.18 : 0.13,
         flatShading: true,
         roughness: 0.55
       })
-    )
+    ),
+    false,
+    false
   );
   marker.position.y = 2.4 * scale;
   marker.rotation.y = island.id * 0.6;
@@ -228,7 +238,9 @@ function createIslandMesh(island: IslandState): Group {
           emissiveIntensity: 0.28,
           roughness: 0.3
         })
-      )
+      ),
+      false,
+      false
     );
     lantern.position.y = 4.4 * scale;
     group.add(lantern);
@@ -483,8 +495,16 @@ void main() {
 const SKY_VERTEX_SHADER = `
 varying vec3 vDirection;
 
+vec3 safeNormalize(vec3 inputVec) {
+  float lenSq = dot(inputVec, inputVec);
+  if (lenSq <= 1e-6) {
+    return vec3(0.0, 1.0, 0.0);
+  }
+  return inputVec * inversesqrt(lenSq);
+}
+
 void main() {
-  vDirection = normalize(position);
+  vDirection = safeNormalize(position);
   vec4 mvPosition = modelViewMatrix * vec4(position, 1.0);
   gl_Position = projectionMatrix * mvPosition;
 }
@@ -500,14 +520,22 @@ uniform float uSunStrength;
 
 varying vec3 vDirection;
 
+vec3 safeNormalize(vec3 inputVec) {
+  float lenSq = dot(inputVec, inputVec);
+  if (lenSq <= 1e-6) {
+    return vec3(0.0, 1.0, 0.0);
+  }
+  return inputVec * inversesqrt(lenSq);
+}
+
 void main() {
-  vec3 direction = normalize(vDirection);
+  vec3 direction = safeNormalize(vDirection);
   float t = clamp(direction.y * 0.5 + 0.5, 0.0, 1.0);
 
   vec3 color = mix(uBottomColor, uHorizonColor, smoothstep(0.1, 0.56, t));
   color = mix(color, uTopColor, smoothstep(0.5, 1.0, t));
 
-  float sunMask = pow(max(dot(direction, normalize(uSunDirection)), 0.0), 180.0);
+  float sunMask = pow(max(dot(direction, safeNormalize(uSunDirection)), 0.0), 180.0);
   color += uSunColor * sunMask * uSunStrength;
 
   gl_FragColor = vec4(color, 1.0);
@@ -594,17 +622,19 @@ export function createEnvironment(
   };
 
   const sky = new Mesh(
-    new SphereGeometry(420, 28, 20),
+    new SphereGeometry(300, 28, 20),
     new ShaderMaterial({
       uniforms: skyUniforms,
       vertexShader: SKY_VERTEX_SHADER,
       fragmentShader: SKY_FRAGMENT_SHADER,
-      side: BackSide,
+      side: DoubleSide,
+      depthTest: false,
       depthWrite: false,
       fog: false
     })
   );
   sky.frustumCulled = false;
+  sky.renderOrder = -100;
   scene.add(sky);
 
   const stormWaterColor = new Color("#264f6b");
@@ -675,7 +705,8 @@ export function createEnvironment(
     uniforms: waterUniforms,
     vertexShader: WATER_VERTEX_SHADER,
     fragmentShader: WATER_FRAGMENT_SHADER,
-    fog: true
+    fog: true,
+    side: DoubleSide
   });
   const water = new Mesh(createWaterGeometry(waterPreset.geometrySegments), waterMaterial);
   water.position.y = 0;
