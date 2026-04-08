@@ -33,6 +33,7 @@ import {
   type WakeQualityLevel,
   type WakeShaderInfluence
 } from "../wake/createShipWakeController";
+import type { CameraOrbitState } from "../app/createCamera";
 
 const HIT_FLASH_DURATION = 0.24;
 const MUZZLE_FLASH_DURATION = 0.18;
@@ -153,6 +154,7 @@ export interface RenderBridgeState {
   cameraDesiredPosition: Vector3;
   cameraDesiredLookTarget: Vector3;
   cameraLookTarget: Vector3;
+  cameraOrbit: CameraOrbitState;
   cameraSmoothedHeading: number;
   cameraHeadingInitialized: boolean;
   cameraLookInitialized: boolean;
@@ -859,14 +861,19 @@ export function syncRenderFromSimulation(
 
   const cameraForwardX = Math.sin(bridge.cameraSmoothedHeading);
   const cameraForwardZ = Math.cos(bridge.cameraSmoothedHeading);
+  const orbitHeading = bridge.cameraSmoothedHeading + bridge.cameraOrbit.yawOffset;
+  const orbitForwardX = Math.sin(orbitHeading);
+  const orbitForwardZ = Math.cos(orbitHeading);
   const speedAbs = Math.abs(playerPose.speed);
   const followDistance = 12 + clamp(speedAbs * 0.3, 0, 2.4);
+  const orbitPlanarDistance = followDistance * Math.cos(bridge.cameraOrbit.pitchOffset);
+  const orbitHeightOffset = Math.sin(bridge.cameraOrbit.pitchOffset) * followDistance;
   const desiredHeight = 6.7 + clamp(speedAbs * 0.11, 0, 1.0);
 
   bridge.cameraDesiredPosition.set(
-    playerPose.x - cameraForwardX * followDistance,
-    desiredHeight,
-    playerPose.z - cameraForwardZ * followDistance
+    playerPose.x - orbitForwardX * orbitPlanarDistance,
+    desiredHeight + orbitHeightOffset,
+    playerPose.z - orbitForwardZ * orbitPlanarDistance
   );
 
   const desiredLookAhead = 1.15 + clamp(speedAbs * 0.03, 0, 0.24);

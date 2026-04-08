@@ -18,6 +18,7 @@ Current browser prototype for the pirate game design:
 - `Space`: collect loot / dock / undock
 - `R`: consume repair material to repair hull (cooldown applies)
 - `Shift`: hold for temporary speed burst (release ends burst, cooldown applies)
+- `Right Mouse Button` + drag: orbit camera around ship (yaw + clamped pitch, angle persists on release)
 - `Esc`: close dock menu
 - `F3`: toggle debug overlay
 

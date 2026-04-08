@@ -21,6 +21,12 @@ import {
   type RenderBridgeState
 } from "./adapters/renderBridge";
 
+export interface RenderWorldOptions {
+  renderConfigOverrides?: RenderConfigOverrides;
+  cameraInputTarget?: EventTarget;
+  cameraWindowTarget?: Window;
+}
+
 export interface RenderWorld {
   scene: Scene;
   camera: PerspectiveCamera;
@@ -46,10 +52,13 @@ function disposeGroup(group: Group): void {
   });
 }
 
-export function createRenderWorld(overrides: RenderConfigOverrides = {}): RenderWorld {
-  const renderConfig = createRenderConfig(overrides);
+export function createRenderWorld(options: RenderWorldOptions = {}): RenderWorld {
+  const renderConfig = createRenderConfig(options.renderConfigOverrides ?? {});
   const scene = createScene();
-  const cameraController = createCamera();
+  const cameraController = createCamera({
+    windowTarget: options.cameraWindowTarget ?? window,
+    inputTarget: options.cameraInputTarget
+  });
   const { camera } = cameraController;
 
   const environment = createEnvironment(scene, renderConfig.water, renderConfig.atmosphere);
@@ -135,6 +144,7 @@ export function createRenderWorld(overrides: RenderConfigOverrides = {}): Render
     cameraDesiredPosition: new Vector3(),
     cameraDesiredLookTarget: new Vector3(),
     cameraLookTarget: new Vector3(),
+    cameraOrbit: cameraController.orbit,
     cameraSmoothedHeading: 0,
     cameraHeadingInitialized: false,
     cameraLookInitialized: false,

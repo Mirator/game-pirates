@@ -48,7 +48,10 @@ const debugWindow = window as Window & {
 const inputController = createInputState(window);
 
 const rendererContext = createRenderer(app);
-const renderWorld = createRenderWorld();
+const renderWorld = createRenderWorld({
+  cameraInputTarget: rendererContext.canvas,
+  cameraWindowTarget: window
+});
 const { renderer } = rendererContext;
 renderer.toneMappingExposure = renderWorld.bridge.environment.lighting.getCurrentExposure();
 if (shouldExposeDebugHandles) {

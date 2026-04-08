@@ -77,4 +77,16 @@ describe("createShipMesh ship factory", () => {
     expect(leftSmoke?.position.x ?? 0).toBeLessThan(0);
     expect(rightSmoke?.position.x ?? 0).toBeGreaterThan(0);
   });
+
+  it("keeps sail readable from orbit angles", () => {
+    const visual = createShipMesh(createShipDefinition("player"));
+    const sail = visual.group.getObjectByName("ship-sail");
+    expect(sail).toBeTruthy();
+    expect(sail?.castShadow ?? true).toBe(false);
+    expect(sail?.receiveShadow ?? true).toBe(false);
+
+    const firstFlashChannel = visual.flashChannels[2];
+    expect(firstFlashChannel).toBeDefined();
+    expect(firstFlashChannel?.material.emissiveIntensity ?? 0).toBeGreaterThan(0);
+  });
 });

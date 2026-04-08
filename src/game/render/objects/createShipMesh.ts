@@ -550,6 +550,9 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   const deckMaterial = createMaterial(palette.deck, { roughness: 0.88, metalness: 0.04 });
   const mastMaterial = createMaterial(palette.mast, { roughness: 0.86, metalness: 0.04 });
   const sailMaterial = createDoubleSidedMaterial(palette.sail, { roughness: 0.76, metalness: 0.02 });
+  sailMaterial.flatShading = false;
+  sailMaterial.emissive.set(palette.sail);
+  sailMaterial.emissiveIntensity = 0.08;
   const accentMaterial = createDoubleSidedMaterial(palette.accent, {
     roughness: 0.42,
     metalness: 0.1,
@@ -612,9 +615,9 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   mast.position.set(0, silhouette.hullHeight + silhouette.mastHeight * 0.5, silhouette.sailOffsetZ * 0.34);
   presentation.add(mast);
 
-  const sail = enableShadows(
-    new Mesh(createSailGeometry(silhouette.sailShape, silhouette.sailWidth, silhouette.sailHeight), sailMaterial)
-  );
+  const sail = new Mesh(createSailGeometry(silhouette.sailShape, silhouette.sailWidth, silhouette.sailHeight), sailMaterial);
+  sail.castShadow = false;
+  sail.receiveShadow = false;
   sail.name = "ship-sail";
   sail.position.set(0, silhouette.sailOffsetY, silhouette.sailOffsetZ);
   sail.rotation.y = silhouette.sailShape === "lateen" ? Math.PI * 0.08 : 0;

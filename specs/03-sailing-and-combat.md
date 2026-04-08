@@ -18,6 +18,7 @@ Cross-spec dependency:
 - R: repair ship.
 - Space: interact, dock, or collect nearby loot.
 - Shift: hold-to-boost burst (duration + cooldown).
+- Hold right mouse button and drag: orbit chase camera around ship (render-only yaw + clamped pitch).
 
 ## Sailing Model
 
@@ -41,6 +42,8 @@ Handling requirements:
 ### Camera Stability Requirements
 
 - Camera follow prioritizes readability over aggressive cinematic behavior.
+- Right-mouse orbit rotates around ship while preserving an upright basis and bounded pitch range.
+- Orbit camera state is render-only and must never mutate gameplay simulation state.
 - Heading jitter from steering must not create frame-to-frame camera shake.
 - Speed-based camera offsets remain bounded.
 

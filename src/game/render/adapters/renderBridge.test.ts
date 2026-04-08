@@ -185,6 +185,11 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
     cameraDesiredPosition: new Vector3(),
     cameraDesiredLookTarget: new Vector3(),
     cameraLookTarget: new Vector3(),
+    cameraOrbit: {
+      yawOffset: 0,
+      pitchOffset: 0,
+      dragging: false
+    },
     cameraSmoothedHeading: 0,
     cameraHeadingInitialized: false,
     cameraLookInitialized: false,
@@ -381,6 +386,51 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
 
       previousHeading = worldState.player.heading;
     }
+  });
+
+  it("keeps default chase-camera offset when orbit offsets are zero", () => {
+    const worldState = createInitialWorldState();
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+
+    const offsetX = bridge.camera.position.x - worldState.player.position.x;
+    const offsetZ = bridge.camera.position.z - worldState.player.position.z;
+    expect(offsetX).toBeCloseTo(0, 4);
+    expect(offsetZ).toBeCloseTo(-12, 4);
+    expect(bridge.camera.position.y).toBeCloseTo(6.7, 4);
+  });
+
+  it("applies orbit yaw offset by rotating camera azimuth around the ship", () => {
+    const worldState = createInitialWorldState();
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+    bridge.cameraOrbit.yawOffset = Math.PI * 0.5;
+
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+
+    const offsetX = bridge.camera.position.x - worldState.player.position.x;
+    const offsetZ = bridge.camera.position.z - worldState.player.position.z;
+    expect(Math.abs(offsetX)).toBeGreaterThan(10);
+    expect(Math.abs(offsetZ)).toBeLessThan(2);
+  });
+
+  it("applies orbit pitch offset to camera elevation", () => {
+    const worldState = createInitialWorldState();
+    const interpolation = createInterpolationContext(worldState, 1);
+
+    const highBridge = createBridge();
+    highBridge.cameraOrbit.pitchOffset = 0.45;
+    syncRenderFromSimulation(worldState, highBridge, 1 / 60, interpolation);
+
+    const lowBridge = createBridge();
+    lowBridge.cameraOrbit.pitchOffset = -0.35;
+    syncRenderFromSimulation(worldState, lowBridge, 1 / 60, interpolation);
+
+    expect(highBridge.camera.position.y).toBeGreaterThan(lowBridge.camera.position.y);
+    expect(highBridge.camera.position.y).toBeGreaterThan(11);
+    expect(lowBridge.camera.position.y).toBeLessThan(3);
   });
 
   it("keeps an upright camera basis and unflipped projection while turning", () => {

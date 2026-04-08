@@ -60,6 +60,7 @@ Requirements:
 - turning response is stronger than realistic naval simulation.
 - lateral drift is heavily controlled.
 - acceleration and speed changes are visually legible.
+- optional right-mouse orbit is render-only (yaw + clamped pitch) and preserves gameplay readability.
 
 ## Input Contract
 
@@ -70,12 +71,14 @@ Required controls:
 - `A` / `ArrowLeft`: turn left.
 - `D` / `ArrowRight`: turn right.
 - `Shift`: hold-to-boost.
+- hold right mouse button and drag to orbit camera around ship (render-only).
 
 Input behavior rules:
 
 - turning works at low speed.
 - controls never require perfect momentum management.
 - boost is immediate and clearly useful.
+- camera orbit input must never alter simulation handling, only render camera state.
 
 ## Core Movement Model
 
