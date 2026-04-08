@@ -1,6 +1,11 @@
 import { defineConfig } from "vitest/config";
 
+const repositoryName = process.env.GITHUB_REPOSITORY?.split("/")[1];
+const githubPagesBase = repositoryName ? `/${repositoryName}/` : "/";
+const base = process.env.GITHUB_ACTIONS === "true" ? githubPagesBase : "/";
+
 export default defineConfig({
+  base,
   resolve: {
     alias: {
       three: "three/src/Three.js"
