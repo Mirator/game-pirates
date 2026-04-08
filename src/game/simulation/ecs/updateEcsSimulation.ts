@@ -96,6 +96,7 @@ import {
 } from "../sideMath";
 import { DEFAULT_WATER_SURFACE_TUNING, DEFAULT_WATER_SURFACE_WAVES } from "../../physics/waterProfile";
 import { sampleWaterHeight } from "../../physics/waterSurface";
+import { createShipBuoyancyProbes, getShipColliderProfileForEnemyArchetype } from "../../ships/shipProfiles";
 import { ensureEcsState, syncEcsFromWorldView, syncWorldViewFromEcs } from "./createEcsState";
 import { clamp, distanceSquared, normalizeAngle, steeringTowardHeading } from "./math";
 import type { EcsEnemyIntent, EcsState, WorldWithEcs } from "./types";
@@ -459,6 +460,7 @@ function chooseSpawnPoint(worldState: WorldWithEcs): { x: number; z: number; hea
 
 function createEnemy(worldState: WorldWithEcs, id: number, archetype: EnemyArchetype, s: { x: number; z: number; heading: number }): EnemyState {
   const p = EPF[archetype];
+  const colliderProfile = getShipColliderProfileForEnemyArchetype(archetype);
   return {
     id,
     archetype,
@@ -477,20 +479,19 @@ function createEnemy(worldState: WorldWithEcs, id: number, archetype: EnemyArche
     turnInput: 0,
     hp: p.maxHp,
     maxHp: p.maxHp,
-    radius: archetype === "navy" ? 2.5 : 2.1,
+    radius: colliderProfile.radius,
     mass: ENEMY_MASS_BASE * p.massScale,
-    centerOfMass: { x: 0, y: -0.24, z: 0 },
-    buoyancyProbes: [
-      { id: "bow-left", localOffset: { x: -1.1, y: 0, z: 2.6 }, weight: 1 },
-      { id: "bow-right", localOffset: { x: 1.1, y: 0, z: 2.6 }, weight: 1 },
-      { id: "stern-left", localOffset: { x: -1.1, y: 0, z: -2.6 }, weight: 1 },
-      { id: "stern-right", localOffset: { x: 1.1, y: 0, z: -2.6 }, weight: 1 },
-      { id: "center", localOffset: { x: 0, y: -0.12, z: 0 }, weight: 1.2 }
-    ],
+    centerOfMass: { x: 0, y: colliderProfile.centerOfMassY, z: 0 },
+    buoyancyProbes: createShipBuoyancyProbes(colliderProfile),
     buoyancyStrength: 620 * p.buoyancyScale,
     buoyancyDamping: 8.5,
     buoyancyLoss: 0,
-    hull: { kind: "compound_hull", length: archetype === "navy" ? 6.2 : 5.6, width: archetype === "navy" ? 2.8 : 2.4, draft: 1 },
+    hull: {
+      kind: "compound_hull",
+      length: colliderProfile.length,
+      width: colliderProfile.width,
+      draft: colliderProfile.draft
+    },
     drag: { linearAir: 0.26, linearWater: 1.15, lateralWater: 2.55, angularAir: 1.02, angularWater: 2.4, rollDamping: 3.35, pitchDamping: 3.4 },
     thrustForce: 780 * p.thrustScale,
     turnTorque: 80 * p.turnScale,

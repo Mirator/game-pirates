@@ -50,6 +50,8 @@ Cross-spec dependencies:
 - Spec 09 consumes handling outputs (speed, turn rate, acceleration cues) for
   render-only ship presentation feedback (tilt/sail/contact). Those visuals must
   never feed back into gameplay handling authority.
+- GLB ship anchors (sail nodes, cannon-side anchors, stern wake anchor) are
+  presentation integration inputs only and must never mutate movement authority.
 
 ## Camera and Readability Assumptions
 

@@ -19,9 +19,13 @@ Cross-spec dependencies:
 - Spec 12: Player and Ship Movement System (authoritative handling outputs that
   drive visual cues).
 
-V1 scope note:
-- Ship rendering uses procedural meshes for now.
-- Data contracts are GLTF-preferred and asset-pipeline ready for later swap-in.
+V2 MVP scope note:
+- Ship rendering is GLB-first with procedural fallback.
+- Shipping model set:
+  - `player_v2`
+  - `enemy_raider_v2`
+  - `enemy_navy_v2`
+- Merchant reuses `enemy_raider_v2` geometry with calmer palette/material tuning.
 
 ## 1. Purpose
 
@@ -237,10 +241,41 @@ class expansion.
 ## 8. Technical Requirements
 
 - Use low-poly or stylized optimized meshes.
-- Prefer GLTF workflow.
+- Use GLB/GLTF workflow as the primary runtime path.
 - Materials should support directional light and shadows.
 - Ships should work with current water and lighting systems.
 - Enemy variants should reuse a common base where possible for efficiency.
+- Per-ship material budget:
+  - target 2 materials (wood + sail)
+  - max 3 materials (accent/metal allowed when readability requires it)
+- Required node/anchor contract for all GLB ships:
+  - `ship_root`
+  - `ship-presentation`
+  - `ship-mast`
+  - at least one sail node prefixed with `ship-sail`
+  - `anchor-wake-stern`
+  - `anchor-cannon-left-*`
+  - `anchor-cannon-right-*`
+- Pivot and orientation contract:
+  - ship pivot at waterline-centered local origin
+  - forward axis aligns with +Z
+  - avoid per-model runtime scale hacks.
+- Collision contract:
+  - gameplay collisions use simplified collider profiles
+  - render meshes are never used as collision authority.
+
+## 8.1 Public Interfaces
+
+- `ShipModelId = \"player_v2\" | \"enemy_raider_v2\" | \"enemy_navy_v2\"`.
+- `ShipDefinition` includes:
+  - `modelId`
+  - `materialProfileId`
+  - `colliderProfileId`
+  - `fallbackPolicy`
+- Runtime ship visuals expose anchor-driven integration data:
+  - stern wake offset from `anchor-wake-stern`
+  - cannon-side mount anchors
+  - sail node references for render-only animation drivers.
 
 ## 9. Acceptance Criteria
 
@@ -258,3 +293,10 @@ class expansion.
 - Ships appear grounded to water with stable under-hull contact cue.
 - Ships provide clear visual combat feedback.
 - Player can identify threats at distance.
+
+### Technical
+
+- Player and enemy ship models load from GLB without runtime errors in normal flow.
+- Procedural fallback remains functional when GLB load/validation fails.
+- Wake stern placement uses anchor-driven offset when available.
+- Collider profiles stay simplified and independent from render mesh topology.

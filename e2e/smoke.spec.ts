@@ -204,6 +204,29 @@ test("smoke: pause flow, esc precedence, combat, and responsive hud", async ({ p
     return debugState?.worldState.enemies.length ?? 0;
   });
   expect(enemyCount).toBeGreaterThanOrEqual(3);
+
+  const shipAssetSources = await page.evaluate(() => {
+    const debugState = (window as Window & {
+      __BLACKWAKE_DEBUG__?: {
+        bridge?: {
+          playerVisual?: {
+            group?: {
+              userData?: Record<string, unknown>;
+            };
+          };
+          enemyVisuals?: Map<number, { group: { userData?: Record<string, unknown> } }>;
+        };
+      };
+    }).__BLACKWAKE_DEBUG__;
+    const playerAssetSource = String(debugState?.bridge?.playerVisual?.group?.userData?.assetSource ?? "missing");
+    const enemyAssetSources = Array.from(debugState?.bridge?.enemyVisuals?.values?.() ?? []).map((visual) =>
+      String(visual.group.userData?.assetSource ?? "missing")
+    );
+    return { playerAssetSource, enemyAssetSources };
+  });
+  expect(shipAssetSources.playerAssetSource).toBe("gltf");
+  expect(shipAssetSources.enemyAssetSources.every((source) => source === "gltf")).toBe(true);
+
   await page.screenshot({ path: "test-results/ship-readability-desktop.png" });
 
   await page.evaluate(() => {

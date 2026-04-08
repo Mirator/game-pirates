@@ -1,5 +1,6 @@
 import {
   ClampToEdgeWrapping,
+  Box3,
   BoxGeometry,
   CircleGeometry,
   Color,
@@ -9,9 +10,11 @@ import {
   DoubleSide,
   Group,
   LinearFilter,
+  Material,
   Mesh,
   MeshBasicMaterial,
   MeshStandardMaterial,
+  Object3D,
   PlaneGeometry,
   RGBAFormat,
   Shape,
@@ -19,9 +22,19 @@ import {
   UnsignedByteType,
   Vector3
 } from "three";
+import {
+  getShipVisualContract,
+  type ShipColliderProfileId,
+  type ShipFallbackPolicy,
+  type ShipMaterialProfileId,
+  type ShipModelId,
+  type ShipVisualRole
+} from "../../ships/shipProfiles";
+import { instantiateShipAssetRoot, SHIP_NODE_NAMES } from "./shipAssetLoader";
+
+export type { ShipVisualRole } from "../../ships/shipProfiles";
 
 export type ShipClass = "small" | "medium" | "heavy";
-export type ShipVisualRole = "player" | "merchant" | "raider" | "navy";
 export type ShipAssetSource = "procedural" | "gltf";
 export type SailShape = "square" | "lateen";
 
@@ -62,6 +75,10 @@ export interface ShipDefinition {
   shipClass: ShipClass;
   silhouette: ShipSilhouette;
   palette: ShipPalette;
+  modelId: ShipModelId;
+  materialProfileId: ShipMaterialProfileId;
+  colliderProfileId: ShipColliderProfileId;
+  fallbackPolicy: ShipFallbackPolicy;
   assetSource?: ShipAssetSource;
   assetId?: string;
 }
@@ -90,6 +107,9 @@ export interface ShipVisual {
   group: Group;
   presentation: Group;
   definition: ShipDefinition;
+  resolvedAssetSource: ShipAssetSource;
+  materialCount: number;
+  wakeSternOffset: number;
   sails: ShipSailVisual[];
   contactShadow: Mesh;
   contactShadowMaterial: MeshBasicMaterial;
@@ -481,6 +501,7 @@ const CONTACT_PATCH_ALPHA_TEXTURE = createContactAlphaTexture(0.78);
 function getBaseDefinition(role: ShipVisualRole): ShipDefinition {
   const style = ROLE_STYLES[role];
   const classPreset = SHIP_CLASS_PRESETS[style.shipClass];
+  const contract = getShipVisualContract(role);
 
   return {
     role,
@@ -510,8 +531,12 @@ function getBaseDefinition(role: ShipVisualRole): ShipDefinition {
       cannonMountLength: classPreset.cannonMountLength,
       cannonMountRadius: classPreset.cannonMountRadius
     },
-    assetSource: "procedural",
-    assetId: `${role}-procedural-v1`
+    modelId: contract.modelId,
+    materialProfileId: contract.materialProfileId,
+    colliderProfileId: contract.colliderProfileId,
+    fallbackPolicy: contract.fallbackPolicy,
+    assetSource: "gltf",
+    assetId: contract.modelId
   };
 }
 
@@ -527,20 +552,140 @@ function registerFlashChannels(materials: MeshStandardMaterial[]): ShipFlashChan
   }));
 }
 
+function getUniqueStandardMaterials(root: Object3D): MeshStandardMaterial[] {
+  const unique = new Set<MeshStandardMaterial>();
+  root.traverse((obj) => {
+    const mesh = obj as Mesh;
+    if (!mesh.isMesh || !mesh.material) {
+      return;
+    }
+
+    if (Array.isArray(mesh.material)) {
+      for (const material of mesh.material) {
+        if (material instanceof MeshStandardMaterial) {
+          unique.add(material);
+        }
+      }
+      return;
+    }
+
+    if (mesh.material instanceof MeshStandardMaterial) {
+      unique.add(mesh.material);
+    }
+  });
+
+  return [...unique];
+}
+
+function collectSailsFromRoot(root: Object3D): ShipSailVisual[] {
+  const sails: ShipSailVisual[] = [];
+  root.traverse((obj) => {
+    const mesh = obj as Mesh;
+    if (!mesh.isMesh || !mesh.name.startsWith(SHIP_NODE_NAMES.sailPrefix)) {
+      return;
+    }
+
+    mesh.castShadow = false;
+    mesh.receiveShadow = false;
+    sails.push({
+      mesh,
+      baseRotation: {
+        x: mesh.rotation.x,
+        y: mesh.rotation.y,
+        z: mesh.rotation.z
+      },
+      basePosition: mesh.position.clone(),
+      baseScale: mesh.scale.clone(),
+      phaseOffset: sails.length * 0.28
+    });
+  });
+
+  if (sails.length === 0) {
+    const fallbackSail = root.getObjectByName("ship-sail") as Mesh | null;
+    if (fallbackSail?.isMesh) {
+      fallbackSail.castShadow = false;
+      fallbackSail.receiveShadow = false;
+      sails.push({
+        mesh: fallbackSail,
+        baseRotation: {
+          x: fallbackSail.rotation.x,
+          y: fallbackSail.rotation.y,
+          z: fallbackSail.rotation.z
+        },
+        basePosition: fallbackSail.position.clone(),
+        baseScale: fallbackSail.scale.clone(),
+        phaseOffset: 0
+      });
+    }
+  }
+
+  return sails;
+}
+
+function collectAnchorMounts(root: Object3D, prefix: string, intoLocalSpace: Object3D): Vector3[] {
+  const anchors: { order: number; point: Vector3 }[] = [];
+  const scratch = new Vector3();
+  root.updateMatrixWorld(true);
+
+  root.traverse((obj) => {
+    if (!obj.name.startsWith(prefix)) {
+      return;
+    }
+    obj.getWorldPosition(scratch);
+    const local = intoLocalSpace.worldToLocal(scratch.clone());
+    const suffix = obj.name.slice(prefix.length);
+    const parsed = Number.parseInt(suffix, 10);
+    anchors.push({
+      order: Number.isNaN(parsed) ? Number.MAX_SAFE_INTEGER : parsed,
+      point: local
+    });
+  });
+
+  anchors.sort((a, b) => a.order - b.order);
+  return anchors.map((anchor) => anchor.point);
+}
+
+function countStandardMaterials(root: Object3D): number {
+  return getUniqueStandardMaterials(root).length;
+}
+
+function disposeObjectHierarchy(root: Object3D): void {
+  root.traverse((obj) => {
+    const mesh = obj as Mesh;
+    if (!mesh.isMesh || !mesh.geometry || !mesh.material) {
+      return;
+    }
+
+    mesh.geometry.dispose();
+    if (Array.isArray(mesh.material)) {
+      for (const material of mesh.material) {
+        material.dispose();
+      }
+      return;
+    }
+    mesh.material.dispose();
+  });
+}
+
 export function createShipMesh(definition: ShipDefinition): ShipVisual {
   const silhouette = definition.silhouette;
   const palette = definition.palette;
+  const requestedAssetSource = definition.assetSource ?? "procedural";
+  let resolvedAssetSource: ShipAssetSource = "procedural";
+  let materialCount = 0;
+  let wakeSternOffset = silhouette.hullLength * 0.48;
 
   const group = new Group();
   group.name = `ship-${definition.role}`;
   group.userData.shipRole = definition.role;
   group.userData.shipClass = definition.shipClass;
-  group.userData.assetId = definition.assetId ?? null;
-  group.userData.assetSource = definition.assetSource ?? "procedural";
-
-  if (definition.assetSource === "gltf") {
-    group.userData.assetFallback = "procedural-fallback";
-  }
+  group.userData.assetId = definition.assetId ?? definition.modelId;
+  group.userData.modelId = definition.modelId;
+  group.userData.materialProfileId = definition.materialProfileId;
+  group.userData.colliderProfileId = definition.colliderProfileId;
+  group.userData.requestedAssetSource = requestedAssetSource;
+  group.userData.assetSource = resolvedAssetSource;
+  group.userData.assetFallback = null;
 
   const presentation = new Group();
   presentation.name = "ship-presentation";
@@ -804,12 +949,136 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   muzzleRight.group.position.set(silhouette.hullWidth * 0.5 + 0.45, mountY + 0.05, 0);
   presentation.add(muzzleRight.group);
 
-  const flashChannels = registerFlashChannels([hullMaterial, deckMaterial, sailMaterial, accentMaterial, cannonMaterial]);
+  let flashChannels = registerFlashChannels([hullMaterial, deckMaterial, sailMaterial, accentMaterial, cannonMaterial]);
+
+  if (requestedAssetSource === "gltf") {
+    const assetRoot = instantiateShipAssetRoot(definition.modelId);
+    if (assetRoot) {
+      const oldChildren = [...presentation.children];
+      for (const child of oldChildren) {
+        if (child === muzzleLeft.group || child === muzzleRight.group) {
+          continue;
+        }
+        presentation.remove(child);
+        disposeObjectHierarchy(child);
+      }
+
+      presentation.add(assetRoot);
+      presentation.updateMatrixWorld(true);
+
+      const anchoredLeftMounts = collectAnchorMounts(assetRoot, SHIP_NODE_NAMES.cannonLeftPrefix, presentation);
+      const anchoredRightMounts = collectAnchorMounts(assetRoot, SHIP_NODE_NAMES.cannonRightPrefix, presentation);
+      if (anchoredLeftMounts.length > 0 && anchoredRightMounts.length > 0) {
+        cannonMountsLeft.length = 0;
+        cannonMountsLeft.push(...anchoredLeftMounts);
+        cannonMountsRight.length = 0;
+        cannonMountsRight.push(...anchoredRightMounts);
+      }
+
+      const assetSails = collectSailsFromRoot(assetRoot);
+      if (assetSails.length > 0) {
+        sails.length = 0;
+        sails.push(...assetSails);
+      }
+
+      const sternAnchor = assetRoot.getObjectByName(SHIP_NODE_NAMES.wakeSternAnchor);
+      if (sternAnchor) {
+        const sternLocal = presentation.worldToLocal(sternAnchor.getWorldPosition(new Vector3()));
+        wakeSternOffset = Math.max(0.4, Math.abs(sternLocal.z));
+      }
+
+      const presentationBounds = new Box3().setFromObject(assetRoot);
+      const presentationSize = presentationBounds.getSize(new Vector3());
+      const resolvedHullWidth = Math.max(silhouette.hullWidth * 0.8, presentationSize.x);
+      const resolvedHullLength = Math.max(silhouette.hullLength * 0.8, presentationSize.z);
+      const resolvedHullHeight = Math.max(silhouette.hullHeight * 0.8, presentationSize.y);
+
+      wakeTrail.position.set(0, 0.06, -wakeSternOffset - resolvedHullLength * 0.08);
+      wakeTrail.scale.set(
+        Math.max(0.72, resolvedHullWidth / Math.max(1e-5, silhouette.hullWidth)),
+        1,
+        Math.max(0.72, resolvedHullLength / Math.max(1e-5, silhouette.hullLength))
+      );
+      wakeTrail.userData.baseX = wakeTrail.position.x;
+      wakeTrail.userData.baseZ = wakeTrail.position.z;
+
+      wakeFoam.position.set(0, 0.085, -wakeSternOffset * 0.94);
+      wakeFoam.scale.set(
+        Math.max(0.86, resolvedHullWidth / Math.max(1e-5, silhouette.hullWidth)) * 1.25,
+        0.74,
+        1
+      );
+      wakeFoam.userData.baseX = wakeFoam.position.x;
+      wakeFoam.userData.baseZ = wakeFoam.position.z;
+
+      wakeRibbonLeft.position.set(-resolvedHullWidth * 0.42, 0.07, -wakeSternOffset * 0.84);
+      wakeRibbonLeft.userData.baseX = wakeRibbonLeft.position.x;
+      wakeRibbonLeft.userData.baseZ = wakeRibbonLeft.position.z;
+
+      wakeRibbonRight.position.set(resolvedHullWidth * 0.42, 0.07, -wakeSternOffset * 0.84);
+      wakeRibbonRight.userData.baseX = wakeRibbonRight.position.x;
+      wakeRibbonRight.userData.baseZ = wakeRibbonRight.position.z;
+
+      wakeSpray.position.set(0, 0.11, -wakeSternOffset - resolvedHullLength * 0.18);
+      wakeSpray.userData.baseX = wakeSpray.position.x;
+      wakeSpray.userData.baseZ = wakeSpray.position.z;
+
+      contactShadow.scale.set(resolvedHullWidth * 1.18, 1, resolvedHullLength * 0.94);
+      contactShadow.userData.baseScaleX = contactShadow.scale.x;
+      contactShadow.userData.baseScaleZ = contactShadow.scale.z;
+
+      contactPatch.position.z = -resolvedHullLength * 0.04;
+      contactPatch.scale.set(resolvedHullWidth * 0.8, 1, resolvedHullLength * 0.62);
+      contactPatch.userData.baseScaleX = contactPatch.scale.x;
+      contactPatch.userData.baseScaleZ = contactPatch.scale.z;
+
+      const leftMidMount = cannonMountsLeft[Math.floor(cannonMountsLeft.length * 0.5)];
+      if (leftMidMount) {
+        muzzleLeft.group.position.set(leftMidMount.x - 0.12, leftMidMount.y + 0.05, leftMidMount.z);
+      } else {
+        muzzleLeft.group.position.set(-resolvedHullWidth * 0.5 - 0.45, resolvedHullHeight * 0.68 + 0.05, 0);
+      }
+
+      const rightMidMount = cannonMountsRight[Math.floor(cannonMountsRight.length * 0.5)];
+      if (rightMidMount) {
+        muzzleRight.group.position.set(rightMidMount.x + 0.12, rightMidMount.y + 0.05, rightMidMount.z);
+      } else {
+        muzzleRight.group.position.set(resolvedHullWidth * 0.5 + 0.45, resolvedHullHeight * 0.68 + 0.05, 0);
+      }
+      if (!muzzleLeft.group.parent) {
+        presentation.add(muzzleLeft.group);
+      }
+      if (!muzzleRight.group.parent) {
+        presentation.add(muzzleRight.group);
+      }
+
+      const gltfMaterials = getUniqueStandardMaterials(assetRoot);
+      if (gltfMaterials.length > 0) {
+        flashChannels = registerFlashChannels(gltfMaterials);
+      }
+      materialCount = countStandardMaterials(assetRoot);
+      resolvedAssetSource = "gltf";
+      group.userData.assetFallback = null;
+    } else {
+      group.userData.assetFallback = definition.fallbackPolicy;
+    }
+  }
+
+  if (resolvedAssetSource !== "gltf") {
+    materialCount = countStandardMaterials(presentation);
+  }
+
+  group.userData.assetSource = resolvedAssetSource;
+  group.userData.materialCount = materialCount;
+  group.userData.wakeSternOffset = wakeSternOffset;
 
   return {
     group,
     presentation,
     definition,
+    resolvedAssetSource,
+    materialCount,
+    wakeSternOffset,
     sails,
     contactShadow,
     contactShadowMaterial,

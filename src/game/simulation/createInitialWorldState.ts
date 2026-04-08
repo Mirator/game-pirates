@@ -39,10 +39,8 @@ import {
   PORT_PROMPT_RADIUS,
   PORT_RADIUS,
   PORT_SAFE_RADIUS,
-  SHIP_CENTER_OF_MASS_Y,
   SHIP_MAX_HP,
   SHIP_SPAWN_FREEBOARD,
-  SHIP_RADIUS,
   STORM_INTENSITY_MAX,
   STORM_RADIUS,
   UPGRADE_HULL_COST_START,
@@ -51,22 +49,12 @@ import {
 import type { BuoyancyProbeState, IslandState, ShipOwner, ShipState, WorldState } from "./types";
 import { DEFAULT_WATER_SURFACE_TUNING, DEFAULT_WATER_SURFACE_WAVES } from "../physics/waterProfile";
 import { sampleWaterHeight } from "../physics/waterSurface";
-
-function createBuoyancyProbes(length: number, width: number): BuoyancyProbeState[] {
-  const halfLength = length * 0.5;
-  const halfWidth = width * 0.5;
-  return [
-    { id: "bow-left", localOffset: { x: -halfWidth, y: 0, z: halfLength }, weight: 1 },
-    { id: "bow-right", localOffset: { x: halfWidth, y: 0, z: halfLength }, weight: 1 },
-    { id: "stern-left", localOffset: { x: -halfWidth, y: 0, z: -halfLength }, weight: 1 },
-    { id: "stern-right", localOffset: { x: halfWidth, y: 0, z: -halfLength }, weight: 1 },
-    { id: "center", localOffset: { x: 0, y: -0.12, z: 0 }, weight: 1.2 }
-  ];
-}
+import { createShipBuoyancyProbes, getShipColliderProfile } from "../ships/shipProfiles";
 
 function createShip(owner: ShipOwner, spawn: { x: number; y: number; z: number; heading: number }): ShipState {
-  const hullLength = owner === "player" ? 6 : 5.6;
-  const hullWidth = owner === "player" ? 2.6 : 2.4;
+  const colliderProfile = owner === "player"
+    ? getShipColliderProfile("player_v2")
+    : getShipColliderProfile("enemy_raider_v2");
   const mass = owner === "player" ? PLAYER_MASS : ENEMY_MASS_BASE;
   return {
     owner,
@@ -84,18 +72,18 @@ function createShip(owner: ShipOwner, spawn: { x: number; y: number; z: number; 
     turnInput: 0,
     hp: SHIP_MAX_HP,
     maxHp: SHIP_MAX_HP,
-    radius: SHIP_RADIUS,
+    radius: colliderProfile.radius,
     mass,
-    centerOfMass: { x: 0, y: SHIP_CENTER_OF_MASS_Y, z: 0 },
-    buoyancyProbes: createBuoyancyProbes(hullLength, hullWidth),
+    centerOfMass: { x: 0, y: colliderProfile.centerOfMassY, z: 0 },
+    buoyancyProbes: createShipBuoyancyProbes(colliderProfile) as BuoyancyProbeState[],
     buoyancyStrength: owner === "player" ? PLAYER_BUOYANCY_STRENGTH : ENEMY_BUOYANCY_STRENGTH,
     buoyancyDamping: owner === "player" ? PLAYER_BUOYANCY_DAMPING : ENEMY_BUOYANCY_DAMPING,
     buoyancyLoss: 0,
     hull: {
       kind: "compound_hull",
-      length: hullLength,
-      width: hullWidth,
-      draft: 0.9
+      length: colliderProfile.length,
+      width: colliderProfile.width,
+      draft: colliderProfile.draft
     },
     drag: {
       linearAir: owner === "player" ? PLAYER_LINEAR_DRAG_AIR : ENEMY_LINEAR_DRAG_AIR,

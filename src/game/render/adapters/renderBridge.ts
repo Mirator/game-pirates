@@ -663,7 +663,7 @@ export function syncRenderFromSimulation(
 
       const wakeController = createShipWakeController({
         quality: mapEnemyWakeQuality(enemy.archetype),
-        sternOffset: enemyVisual.definition.silhouette.hullLength * 0.48,
+        sternOffset: enemyVisual.wakeSternOffset,
         rootName: `wake-enemy-${enemy.id}`
       });
       bridge.wakeRoot.add(wakeController.getRoot());

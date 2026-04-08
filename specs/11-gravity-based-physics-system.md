@@ -178,6 +178,16 @@ Collision filtering layers:
 - pickups/debris
 - non-colliding VFX
 
+Collider profile ownership rule:
+
+- Ship collider dimensions are sourced from shared collider profiles linked to
+  ship visual definitions (model contracts), not from render mesh bounds at
+  runtime.
+- Merchant and raider may share a collider profile in MVP.
+- Navy uses a heavier collider profile.
+- Render mesh complexity or topology changes must not silently alter physics
+  collider behavior.
+
 ### Water Height Sampling
 
 - Physics and rendering must share compatible water-height sampling.

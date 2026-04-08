@@ -113,7 +113,7 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
   scene.add(wakeRoot);
   const playerWakeController = createShipWakeController({
     quality: "high",
-    sternOffset: playerVisual.definition.silhouette.hullLength * 0.5,
+    sternOffset: playerVisual.wakeSternOffset,
     rootName: "wake-player-test"
   });
   wakeRoot.add(playerWakeController.getRoot());

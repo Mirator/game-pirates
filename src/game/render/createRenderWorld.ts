@@ -71,7 +71,7 @@ export function createRenderWorld(options: RenderWorldOptions = {}): RenderWorld
   scene.add(wakeRoot);
   const playerWakeController = createShipWakeController({
     quality: "high",
-    sternOffset: playerVisual.definition.silhouette.hullLength * 0.5,
+    sternOffset: playerVisual.wakeSternOffset,
     rootName: "wake-player"
   });
   wakeRoot.add(playerWakeController.getRoot());

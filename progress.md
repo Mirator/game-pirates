@@ -123,3 +123,27 @@ pm run test,
 pm run test:e2e, 
 pm run build all pass.
 
+## Ship Visual Upgrade v2 (2026-04-08)
+- Implemented GLB-first ship asset path with procedural fallback:
+  - added shared ship contracts/profiles (`player_v2`, `enemy_raider_v2`, `enemy_navy_v2`)
+  - merchant now reuses raider geometry with distinct palette profile.
+- Added ship asset manifest + loader cache + node-contract validator:
+  - required anchors: stern wake + left/right cannon anchors
+  - material budget validation (target 2, max 3).
+- Generated and imported authored ship GLBs under `public/assets/ships/`.
+- Upgraded ship mesh factory to consume preloaded GLBs when available while preserving:
+  - render-only tilt/sail/contact hooks
+  - muzzle recoil side behavior
+  - wake integration with stern-anchor-derived offset.
+- Moved simulation ship hull dimensions/probes to shared collider profiles tied to ship visual contracts.
+- Added tests:
+  - ship manifest and asset-contract validation
+  - GLB-first definition + fallback behavior
+  - shared collider profile checks.
+- Updated specs in place: 09, 10, 11, 12 (+ spec index wording alignment).
+
+## Verification (Ship Visual Upgrade v2)
+- `npm run test` passed (96/96).
+- `npm run test:e2e` passed (2/2).
+- `npm run build` passed.
+

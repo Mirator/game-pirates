@@ -102,6 +102,9 @@ Behavior:
 - follows ship transform each frame.
 - strongest opacity near hull.
 - fades rapidly within short range.
+- stern origin should come from ship visual anchor `anchor-wake-stern` when
+  present; fallback to collider/silhouette stern offset only when anchor data is
+  unavailable.
 
 Visuals:
 - irregular foam patch.
@@ -231,6 +234,7 @@ Each ship should have a wake component responsible for:
 - updating stern turbulence.
 - generating/updating wake mesh.
 - exposing wake intensity to water shader if integrated.
+- consuming ship-specific stern offset from the ship visual contract.
 
 Suggested responsibilities:
 

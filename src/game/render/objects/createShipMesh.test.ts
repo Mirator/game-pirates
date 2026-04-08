@@ -9,6 +9,19 @@ function getDimensions(role: ShipVisualRole): Vector3 {
 }
 
 describe("createShipMesh ship factory", () => {
+  it("uses GLB-first definitions with procedural fallback when assets are unavailable", () => {
+    const definition = createShipDefinition("player");
+    expect(definition.assetSource).toBe("gltf");
+    expect(definition.modelId).toBe("player_v2");
+    expect(definition.fallbackPolicy).toBe("procedural_on_failure");
+
+    const visual = createShipMesh(definition);
+    expect(visual.resolvedAssetSource).toBe("procedural");
+    expect(visual.group.userData.requestedAssetSource).toBe("gltf");
+    expect(visual.group.userData.assetFallback).toBe("procedural_on_failure");
+    expect(visual.group.userData.modelId).toBe("player_v2");
+  });
+
   it("creates required visible ship parts for every role", () => {
     const roles: ShipVisualRole[] = ["player", "merchant", "raider", "navy"];
 

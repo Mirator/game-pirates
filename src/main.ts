@@ -6,6 +6,7 @@ import {
   createLoop,
   createRenderer,
   createRenderWorld,
+  preloadShipAssetsForBrowser,
   syncRenderFromSimulation,
   type RenderInterpolationContext,
   type RenderPositionSnapshot,
@@ -48,6 +49,7 @@ const debugWindow = window as Window & {
 const inputController = createInputState(window);
 
 const rendererContext = createRenderer(app);
+await preloadShipAssetsForBrowser();
 const renderWorld = createRenderWorld({
   cameraInputTarget: rendererContext.canvas,
   cameraWindowTarget: window

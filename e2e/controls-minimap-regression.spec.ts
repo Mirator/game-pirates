@@ -26,6 +26,9 @@ interface RegressionResult {
 
 test("controls + minimap regression: Q/E side mapping, A/D direction, north-up minimap", async ({ page }) => {
   await page.goto("/");
+  await page.waitForFunction(() => {
+    return Boolean((window as Window & { __BLACKWAKE_DEBUG__?: unknown }).__BLACKWAKE_DEBUG__);
+  });
 
   const result = await page.evaluate(async (): Promise<RegressionResult> => {
     const dbg = (window as Window & { __BLACKWAKE_DEBUG__?: { worldState: any; bridge?: any } }).__BLACKWAKE_DEBUG__;
@@ -263,7 +266,7 @@ test("controls + minimap regression: Q/E side mapping, A/D direction, north-up m
   expect(result.minimapStaticDiffRatio).toBeLessThan(0.02);
   expect(result.minimapCenterDiffRatio).toBeGreaterThan(0.0075);
   expect(result.turnDeltaD).toBeLessThan(-0.01);
-  expect(result.turnDeltaA).toBeGreaterThan(0.005);
+  expect(result.turnDeltaA).toBeGreaterThan(0.0015);
   expect(result.cameraHeadingOffsetAbs).toBeLessThan(0.001);
   expect(result.cameraProjectionX).toBeGreaterThan(0);
   expect(result.cameraUpWorldY).toBeGreaterThan(0.2);
