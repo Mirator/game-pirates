@@ -25,7 +25,6 @@ import {
   EVENT_CONVOY_DURATION,
   EVENT_NAVY_DURATION,
   EVENT_STORM_DURATION,
-  EVENT_TREASURE_DURATION,
   LOOT_ANGULAR_DAMPING,
   LOOT_BUOYANCY_MULTIPLIER_HEAVY,
   LOOT_BUOYANCY_MULTIPLIER_LIGHT,
@@ -71,9 +70,6 @@ import {
   STORM_INTENSITY_MAX,
   STORM_RADIUS,
   STORM_SPEED_MULTIPLIER,
-  TREASURE_INTERACT_RADIUS,
-  TREASURE_REWARD_BASE,
-  TREASURE_REWARD_STEP,
   UPGRADE_HULL_COST_STEP,
   UPGRADE_HULL_HP_BONUS,
   WORLD_LAYOUT_SCALE
@@ -113,7 +109,6 @@ type EP = {
   lootGoldBase: number;
   lootMaterialBase: number;
   lootCargoBase: number;
-  mapDropEvery: number;
   massScale: number;
   thrustScale: number;
   turnScale: number;
@@ -121,7 +116,7 @@ type EP = {
   buoyancyScale: number;
 };
 
-const EVENT_CYCLE: WorldEventKind[] = ["treasure_marker", "enemy_convoy", "storm", "navy_patrol"];
+const EVENT_CYCLE: WorldEventKind[] = ["enemy_convoy", "storm", "navy_patrol"];
 const PROJ_HEIGHT_HIT = 2.6;
 const SINK_BUOY_LOSS_RATE = 0.55;
 
@@ -135,7 +130,6 @@ const EPF: Record<EnemyArchetype, EP> = {
     lootGoldBase: 58,
     lootMaterialBase: 1,
     lootCargoBase: 3,
-    mapDropEvery: 6,
     massScale: 0.95,
     thrustScale: 0.78,
     turnScale: 0.86,
@@ -151,7 +145,6 @@ const EPF: Record<EnemyArchetype, EP> = {
     lootGoldBase: 36,
     lootMaterialBase: 2,
     lootCargoBase: 2,
-    mapDropEvery: 8,
     massScale: 1,
     thrustScale: 1,
     turnScale: 1,
@@ -167,7 +160,6 @@ const EPF: Record<EnemyArchetype, EP> = {
     lootGoldBase: 82,
     lootMaterialBase: 3,
     lootCargoBase: 4,
-    mapDropEvery: 4,
     massScale: 1.25,
     thrustScale: 0.85,
     turnScale: 0.8,
@@ -880,7 +872,6 @@ function spawnLoot(worldState: WorldWithEcs, ecs: EcsState, enemy: EnemyState): 
   maybeLoot(worldState, ecs, enemy, "gold", p.lootGoldBase + (enemy.id % 4) * 5, 0.2, 2.3);
   maybeLoot(worldState, ecs, enemy, "repair_material", p.lootMaterialBase + (enemy.id % 2), -0.32, 1.5);
   maybeLoot(worldState, ecs, enemy, "cargo", p.lootCargoBase + (enemy.id % 3), 0.92, 1.8);
-  maybeLoot(worldState, ecs, enemy, "treasure_map", enemy.id % p.mapDropEvery === 0 ? 1 : 0, -0.82, 1.2);
 }
 
 function updateLootPhysics(worldState: WorldWithEcs, ecs: EcsState, dt: number): void {
@@ -923,11 +914,6 @@ function collectLoot(worldState: WorldWithEcs, ecs: EcsState): boolean {
       worldState.flags.goldCollected += l.amount;
     } else if (l.kind === "repair_material") worldState.wallet.repairMaterials += l.amount;
     else if (l.kind === "cargo") worldState.wallet.cargo += l.amount;
-    else {
-      worldState.wallet.treasureMaps += l.amount;
-      worldState.treasureObjective.queuedMaps += l.amount;
-      if (!worldState.treasureObjective.active) activateTreasureObjective(worldState, true);
-    }
     emitEvent(worldState, { type: "loot_pickup", kind: l.kind, amount: l.amount });
   }
   return collected;
@@ -1042,49 +1028,6 @@ function updateSinking(worldState: WorldWithEcs, ecs: EcsState, dt: number): voi
   }
 }
 
-function activateTreasureObjective(worldState: WorldWithEcs, fromMap: boolean): void {
-  const islands = worldState.islands.filter((i) => i.kind === "treasure" || i.kind === "scenic");
-  if (islands.length === 0) return;
-  const idx = worldState.treasureObjective.completedCount % islands.length;
-  const target = islands[idx]!;
-  worldState.treasureObjective.active = true;
-  worldState.treasureObjective.fromMap = fromMap;
-  worldState.treasureObjective.targetIslandId = target.id;
-  worldState.treasureObjective.markerPosition.x = target.position.x;
-  worldState.treasureObjective.markerPosition.z = target.position.z;
-  worldState.treasureObjective.rewardGold = TREASURE_REWARD_BASE + worldState.treasureObjective.completedCount * TREASURE_REWARD_STEP;
-}
-
-function tryCollectTreasure(worldState: WorldWithEcs): boolean {
-  if (!worldState.treasureObjective.active) return false;
-  const m = worldState.treasureObjective.markerPosition;
-  const p = worldState.player.position;
-  if (distanceSquared(p.x, p.z, m.x, m.z) > TREASURE_INTERACT_RADIUS ** 2) return false;
-  const r = worldState.treasureObjective.rewardGold;
-  worldState.wallet.gold += r;
-  worldState.flags.goldCollected += r;
-  worldState.wallet.repairMaterials += 1;
-  worldState.treasureObjective.completedCount += 1;
-  if (worldState.treasureObjective.fromMap) {
-    worldState.wallet.treasureMaps = Math.max(0, worldState.wallet.treasureMaps - 1);
-    worldState.treasureObjective.queuedMaps = Math.max(0, worldState.treasureObjective.queuedMaps - 1);
-    emitEvent(worldState, { type: "treasure_map_used" });
-  }
-  worldState.treasureObjective.active = false;
-  worldState.treasureObjective.fromMap = false;
-  worldState.treasureObjective.targetIslandId = null;
-  worldState.eventDirector.statusText = "Treasure secured! Spend your haul at port.";
-  emitEvent(worldState, { type: "treasure_collected", amount: r });
-  emitEvent(worldState, { type: "loot_pickup", kind: "gold", amount: r });
-  if (worldState.eventDirector.activeKind === "treasure_marker") {
-    worldState.eventDirector.activeKind = null;
-    worldState.eventDirector.remaining = 0;
-    worldState.eventDirector.timer = worldState.eventDirector.interval * 0.7;
-  }
-  if (worldState.treasureObjective.queuedMaps > 0) activateTreasureObjective(worldState, true);
-  return true;
-}
-
 function spawnConvoy(worldState: WorldWithEcs, ecs: EcsState): void {
   const b = chooseSpawnPoint(worldState);
   spawnEnemy(worldState, ecs, "merchant", b);
@@ -1111,11 +1054,7 @@ function activateStorm(worldState: WorldWithEcs): void {
 function startEvent(worldState: WorldWithEcs, ecs: EcsState, kind: WorldEventKind): void {
   worldState.eventDirector.activeKind = kind;
   emitEvent(worldState, { type: "world_event_started", kind });
-  if (kind === "treasure_marker") {
-    if (!worldState.treasureObjective.active) activateTreasureObjective(worldState, false);
-    worldState.eventDirector.remaining = EVENT_TREASURE_DURATION;
-    worldState.eventDirector.statusText = "Treasure marker sighted. Reach the beacon and press Space.";
-  } else if (kind === "enemy_convoy") {
+  if (kind === "enemy_convoy") {
     spawnConvoy(worldState, ecs);
     worldState.eventDirector.remaining = EVENT_CONVOY_DURATION;
     worldState.eventDirector.statusText = "Merchant convoy spotted with raider escort.";
@@ -1141,7 +1080,7 @@ function eventTimer(worldState: WorldWithEcs, ecs: EcsState, dt: number): void {
     if (d.remaining <= 0) {
       d.activeKind = null;
       d.timer = d.interval;
-      if (!worldState.treasureObjective.active) d.statusText = "Scanning the horizon for the next encounter.";
+      d.statusText = "Scanning the horizon for the next encounter.";
       worldState.storm.active = false;
       worldState.storm.remaining = 0;
     }
@@ -1277,11 +1216,9 @@ export function updateEcsSimulation(worldState: WorldWithEcs, inputState: InputS
   let consumed = false;
   if (interact) {
     consumed = collectLoot(worldState, ecs);
-    if (!consumed) consumed = tryCollectTreasure(worldState);
   }
   updatePortRange(worldState);
   if (interact && !consumed && worldState.port.playerInRange) togglePortMenu(worldState, true);
-  if (!worldState.treasureObjective.active && worldState.treasureObjective.queuedMaps > 0) activateTreasureObjective(worldState, true);
   worldState.spawnDirector.timer -= dt;
   spawnEnemyIfNeeded(worldState, ecs);
   setDamageState(worldState.player);

@@ -139,12 +139,7 @@ export const UPGRADE_HULL_HP_BONUS = 20;
 export const UPGRADE_HULL_COST_START = 60;
 export const UPGRADE_HULL_COST_STEP = 40;
 
-export const TREASURE_INTERACT_RADIUS = 9;
-export const TREASURE_REWARD_BASE = 90;
-export const TREASURE_REWARD_STEP = 25;
-
 export const EVENT_INTERVAL = 36;
-export const EVENT_TREASURE_DURATION = 28;
 export const EVENT_CONVOY_DURATION = 24;
 export const EVENT_STORM_DURATION = 32;
 export const EVENT_NAVY_DURATION = 24;

@@ -18,7 +18,7 @@ Define the gameplay loops and the minimum feature set for a successful MVP.
 ### Mid Session
 
 - Travel to island, encounter, or world event.
-- Win combat or complete treasure objective.
+- Win combat encounters.
 - Collect rewards.
 - Return to port.
 - Repair and upgrade ship.
@@ -57,8 +57,8 @@ The MVP is successful when:
 ## Example First 10 Minutes
 
 1. Player spawns near starting port.
-2. Tutorial prompt explains movement and cannon controls.
-3. Player sails to a marked target area.
+2. HUD prompts reinforce movement and cannon controls.
+3. Player sails into contested water.
 4. A weak merchant ship appears.
 5. Player lines up broadside and sinks it.
 6. Loot floats and is collected.

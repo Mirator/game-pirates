@@ -45,7 +45,6 @@ import {
   SHIP_RADIUS,
   STORM_INTENSITY_MAX,
   STORM_RADIUS,
-  TREASURE_REWARD_BASE,
   UPGRADE_HULL_COST_START,
   WORLD_BOUNDS_RADIUS
 } from "./constants";
@@ -137,13 +136,8 @@ function resolveSpawnHeight(x: number, z: number, fallbackY: number): number {
 
 export function createInitialWorldState(): WorldState {
   const islands = createIslands();
-  const treasureMarkerIsland = islands.find((island) => island.kind === "treasure") ?? islands[0];
   const stormCenterIsland =
     islands.find((island) => island.kind === "hostile" || island.kind === "scenic") ?? islands[0];
-
-  const treasureMarkerPosition = treasureMarkerIsland
-    ? { x: treasureMarkerIsland.position.x, z: treasureMarkerIsland.position.z }
-    : { x: PLAYER_RESPAWN.x, z: PLAYER_RESPAWN.z };
 
   const stormCenterPosition = stormCenterIsland
     ? { x: stormCenterIsland.position.x, z: stormCenterIsland.position.z }
@@ -181,8 +175,7 @@ export function createInitialWorldState(): WorldState {
     wallet: {
       gold: 0,
       repairMaterials: 0,
-      cargo: 0,
-      treasureMaps: 0
+      cargo: 0
     },
     upgrade: {
       hullLevel: 0,
@@ -207,15 +200,6 @@ export function createInitialWorldState(): WorldState {
       initialSpawnDelay: ENEMY_INITIAL_SPAWN_DELAY,
       staggerDelay: ENEMY_STAGGER_SPAWN_DELAY,
       timer: ENEMY_INITIAL_SPAWN_DELAY
-    },
-    treasureObjective: {
-      active: false,
-      markerPosition: treasureMarkerPosition,
-      targetIslandId: null,
-      rewardGold: TREASURE_REWARD_BASE,
-      completedCount: 0,
-      fromMap: false,
-      queuedMaps: 0
     },
     storm: {
       active: false,

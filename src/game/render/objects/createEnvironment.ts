@@ -816,36 +816,6 @@ export function createEnvironment(
   const islandMeshes = new Map<number, Group>();
   const seenIslandIds = new Set<number>();
 
-  const treasureBeamMaterial = new MeshStandardMaterial({
-    color: "#ffe482",
-    emissive: "#c59c34",
-    emissiveIntensity: 0.24,
-    transparent: true,
-    opacity: 0.36,
-    roughness: 0.26,
-    side: DoubleSide
-  });
-  const treasureRingMaterial = new MeshStandardMaterial({
-    color: "#ffe9a8",
-    emissive: "#d8a948",
-    emissiveIntensity: 0.3,
-    roughness: 0.22
-  });
-  const treasureBeacon = new Group();
-  const treasureBeam = enableShadows(
-    new Mesh(new CylinderGeometry(0.36, 0.66, 15, 10, 1, true), treasureBeamMaterial),
-    false,
-    false
-  );
-  treasureBeam.position.y = 7.5;
-  treasureBeacon.add(treasureBeam);
-  const treasureRing = enableShadows(new Mesh(new TorusGeometry(2.4, 0.18, 8, 22), treasureRingMaterial));
-  treasureRing.rotation.x = Math.PI * 0.5;
-  treasureRing.position.y = 0.22;
-  treasureBeacon.add(treasureRing);
-  treasureBeacon.visible = false;
-  root.add(treasureBeacon);
-
   const stormDiskMaterial = new MeshStandardMaterial({
     color: "#4f6d82",
     emissive: "#384f61",
@@ -1104,18 +1074,6 @@ export function createEnvironment(
         islandsRoot.remove(islandMesh);
         disposeGroup(islandMesh);
         islandMeshes.delete(id);
-      }
-
-      if (worldState.treasureObjective.active) {
-        treasureBeacon.visible = true;
-        treasureBeacon.position.set(worldState.treasureObjective.markerPosition.x, 0, worldState.treasureObjective.markerPosition.z);
-
-        const pulse = 0.72 + Math.sin(context.renderTime * 2.7) * 0.14;
-        treasureBeam.scale.set(1, pulse, 1);
-        treasureBeamMaterial.opacity = 0.32 + Math.sin(context.renderTime * 2.2) * 0.08;
-        treasureRing.rotation.z = context.renderTime * 1.6;
-      } else {
-        treasureBeacon.visible = false;
       }
 
       if (worldState.storm.active) {

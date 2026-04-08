@@ -109,11 +109,6 @@ export function drawMinimap(worldState: WorldState, canvas: HTMLCanvasElement): 
     drawDot(loot.position.x, loot.position.z, loot.kind === "gold" ? "#f4cc5f" : "#7fd9a8", 2.1);
   }
 
-  if (worldState.treasureObjective.active) {
-    drawDot(worldState.treasureObjective.markerPosition.x, worldState.treasureObjective.markerPosition.z, "#fee59b", 3.6);
-    drawDot(worldState.treasureObjective.markerPosition.x, worldState.treasureObjective.markerPosition.z, "#6f5627", 1.1);
-  }
-
   for (const enemy of worldState.enemies) {
     if (enemy.status !== "alive") {
       continue;

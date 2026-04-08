@@ -303,13 +303,6 @@ export function createAudioSystem(target: Window = window): AudioSystem {
             playTone(500, 0.09, { type: "triangle", gain: 0.08, frequencyEnd: 760 });
             playTone(710, 0.13, { type: "triangle", gain: 0.07, frequencyEnd: 930, delay: 0.04 });
             break;
-          case "treasure_map_used":
-            playTone(360, 0.12, { type: "sine", gain: 0.06, frequencyEnd: 420 });
-            break;
-          case "treasure_collected":
-            playTone(640, 0.14, { type: "triangle", gain: 0.09, frequencyEnd: 880 });
-            playTone(840, 0.2, { type: "triangle", gain: 0.08, frequencyEnd: 1120, delay: 0.06 });
-            break;
           case "world_event_started":
             if (event.kind === "storm") {
               playNoise(0.25, 0.07);
@@ -317,10 +310,8 @@ export function createAudioSystem(target: Window = window): AudioSystem {
             } else if (event.kind === "navy_patrol") {
               playTone(310, 0.18, { type: "square", gain: 0.07, frequencyEnd: 220 });
               playTone(230, 0.22, { type: "square", gain: 0.07, frequencyEnd: 160, delay: 0.09 });
-            } else if (event.kind === "enemy_convoy") {
-              playTone(280, 0.16, { type: "triangle", gain: 0.07, frequencyEnd: 360 });
             } else {
-              playTone(460, 0.17, { type: "triangle", gain: 0.07, frequencyEnd: 560 });
+              playTone(280, 0.16, { type: "triangle", gain: 0.07, frequencyEnd: 360 });
             }
             break;
         }

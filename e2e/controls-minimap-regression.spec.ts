@@ -27,16 +27,6 @@ interface RegressionResult {
 test("controls + minimap regression: Q/E side mapping, A/D direction, north-up minimap", async ({ page }) => {
   await page.goto("/");
 
-  const onboarding = page.locator("[data-testid='onboarding-menu']");
-  if (await onboarding.isVisible().catch(() => false)) {
-    const skip = onboarding.getByRole("button", { name: /Skip|Start Sailing/i });
-    if (await skip.first().isVisible().catch(() => false)) {
-      await skip.first().click();
-    } else {
-      await page.keyboard.press("Escape");
-    }
-  }
-
   const result = await page.evaluate(async (): Promise<RegressionResult> => {
     const dbg = (window as Window & { __BLACKWAKE_DEBUG__?: { worldState: any; bridge?: any } }).__BLACKWAKE_DEBUG__;
     if (!dbg) {

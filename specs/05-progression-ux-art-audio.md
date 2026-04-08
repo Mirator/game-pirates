@@ -49,19 +49,16 @@ HUD includes:
 - Gold counter.
 - Repair material counter.
 - Cargo counter.
-- Treasure map counter.
 - Minimap or compass.
-- Current objective or event marker.
+- Current interaction/combat prompt.
 
 Menus include:
 - Pause menu.
 - Port shop.
 - Upgrade menu.
-- Onboarding or briefing menu.
 
 Future optional menus:
 - Dedicated map screen.
-- Dedicated treasure screen.
 
 UI rule:
 - Keep screens compact and readable with minimal text clutter.

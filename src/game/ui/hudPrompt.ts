@@ -1,4 +1,4 @@
-import { TREASURE_INTERACT_RADIUS, type WorldEventKind, type WorldState } from "../simulation";
+import { type WorldEventKind, type WorldState } from "../simulation";
 
 export type PromptPriority = "interaction" | "danger" | "hint";
 
@@ -28,14 +28,6 @@ function isLootNearby(worldState: WorldState): boolean {
     }
   }
   return false;
-}
-
-function isTreasureNearby(worldState: WorldState): boolean {
-  if (!worldState.treasureObjective.active) {
-    return false;
-  }
-  const marker = worldState.treasureObjective.markerPosition;
-  return distanceSquared(marker.x, marker.z, worldState.player.position.x, worldState.player.position.z) <= TREASURE_INTERACT_RADIUS ** 2;
 }
 
 function isStormDanger(worldState: WorldState): boolean {
@@ -69,8 +61,6 @@ function hasNearbyEnemy(worldState: WorldState, threshold: number): boolean {
 
 export function formatEventLabel(kind: WorldEventKind | null): string {
   switch (kind) {
-    case "treasure_marker":
-      return "Treasure Marker";
     case "enemy_convoy":
       return "Enemy Convoy";
     case "storm":
@@ -93,13 +83,6 @@ export function resolvePrompt(worldState: WorldState): PromptInfo {
   if (isLootNearby(worldState)) {
     return {
       text: "Press Space to collect floating loot.",
-      priority: "interaction"
-    };
-  }
-
-  if (isTreasureNearby(worldState)) {
-    return {
-      text: "Press Space to secure the treasure cache.",
       priority: "interaction"
     };
   }

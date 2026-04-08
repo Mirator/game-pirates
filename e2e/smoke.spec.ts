@@ -1,7 +1,5 @@
 import { expect, test, type Locator, type Page } from "@playwright/test";
 
-const ONBOARDING_STORAGE_KEY = "blackwake_onboarding_state";
-
 function parseReloadValue(text: string, side: "L" | "R"): number {
   const pattern = side === "L" ? /Reload L ([0-9]+\.[0-9]+)s/ : /\| R ([0-9]+\.[0-9]+)s/;
   const match = text.match(pattern);
@@ -139,45 +137,19 @@ async function setupShipReadabilityScene(page: Page): Promise<void> {
   });
 }
 
-test("smoke: onboarding, pause flow, esc precedence, combat, and responsive hud", async ({ page }) => {
+test("smoke: pause flow, esc precedence, combat, and responsive hud", async ({ page }) => {
   await page.goto("/");
-
-  await page.evaluate((storageKey) => {
-    window.localStorage.removeItem(storageKey);
-  }, ONBOARDING_STORAGE_KEY);
-  await page.reload();
 
   const canvas = page.locator("canvas").first();
   const hudPrimary = page.locator(".hud-panel-primary");
   const hudMinimap = page.locator(".hud-panel-minimap");
   const dockMenu = page.locator("[data-testid='dock-menu']");
   const pauseMenu = page.locator("[data-testid='pause-menu']");
-  const onboardingMenu = page.locator("[data-testid='onboarding-menu']");
-  const replayTutorial = page.locator("[data-testid='replay-tutorial']");
   const debug = page.locator("[aria-label='Debug readout']");
 
   await expect(canvas).toBeVisible();
   await expect(hudPrimary).toBeVisible();
   await expect(hudMinimap).toBeVisible();
-
-  await expect(onboardingMenu).toBeVisible();
-
-  const onboardingTimeBefore = await page.evaluate(() => {
-    return (window as Window & { __BLACKWAKE_DEBUG__?: { worldState: { time: number } } }).__BLACKWAKE_DEBUG__?.worldState.time ?? 0;
-  });
-  await page.waitForTimeout(350);
-  const onboardingTimeAfter = await page.evaluate(() => {
-    return (window as Window & { __BLACKWAKE_DEBUG__?: { worldState: { time: number } } }).__BLACKWAKE_DEBUG__?.worldState.time ?? 0;
-  });
-  expect(onboardingTimeAfter - onboardingTimeBefore).toBeLessThan(0.02);
-
-  await onboardingMenu.getByRole("button", { name: "Next" }).click();
-  await onboardingMenu.getByRole("button", { name: "Next" }).click();
-  await onboardingMenu.getByRole("button", { name: "Start Sailing" }).click();
-  await expect(onboardingMenu).toBeHidden();
-
-  await page.reload();
-  await expect(onboardingMenu).toBeHidden();
 
   await page.keyboard.press("Escape");
   await expect(pauseMenu).toBeVisible();
@@ -191,14 +163,8 @@ test("smoke: onboarding, pause flow, esc precedence, combat, and responsive hud"
   });
   expect(pausedTimeAfter - pausedTimeBefore).toBeLessThan(0.02);
 
-  await replayTutorial.click();
-  await expect(onboardingMenu).toBeVisible();
-  await expect(pauseMenu).toBeHidden();
-
   await page.keyboard.press("Escape");
-  await expect(onboardingMenu).toBeHidden();
   await expect(pauseMenu).toBeHidden();
-
   await page.keyboard.press("Escape");
   await expect(pauseMenu).toBeVisible();
   await page.keyboard.press("Escape");

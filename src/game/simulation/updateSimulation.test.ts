@@ -10,6 +10,7 @@ import {
   SHIP_SPAWN_FREEBOARD,
   SINK_DURATION,
   createInitialWorldState,
+  drainSimulationEvents,
   tryPurchaseHullUpgrade,
   trySellCargo,
   updateSimulation,
@@ -602,23 +603,54 @@ describe("updateSimulation ECS pipeline", () => {
     expect(Math.abs(enemy.angularVelocity)).toBeLessThan(0.45);
   });
 
-  it("collects treasure map loot and consumes map on objective completion", () => {
+  it("drops only supported loot kinds when enemies sink", () => {
     const worldState = createInitialWorldState();
-    quietWorld(worldState);
+    worldState.eventDirector.timer = 999;
 
-    worldState.loot.push(createLoot(worldState.nextLootId++, "treasure_map", 1, worldState.player.position.x + 1, worldState.player.position.z));
+    stepUntil(worldState, () => worldState.enemies.length > 0, Math.ceil((ENEMY_INITIAL_SPAWN_DELAY + 2) / FIXED_TIME_STEP));
+    worldState.spawnDirector.maxActive = 0;
+    const enemy = worldState.enemies[0];
+    expect(enemy).toBeDefined();
+    if (!enemy) {
+      throw new Error("Expected at least one enemy spawn.");
+    }
 
-    updateSimulation(worldState, { ...neutralInput, interact: true }, FIXED_TIME_STEP);
-    expect(worldState.wallet.treasureMaps).toBe(1);
-    expect(worldState.treasureObjective.active).toBe(true);
-    expect(worldState.treasureObjective.fromMap).toBe(true);
+    enemy.hp = 1;
+    worldState.projectiles.push(createProjectile(worldState.nextProjectileId++, "player", enemy.position.x, enemy.position.z, enemy.position.y));
 
-    worldState.player.position.x = worldState.treasureObjective.markerPosition.x;
-    worldState.player.position.z = worldState.treasureObjective.markerPosition.z;
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+    const unsupportedLoot = worldState.loot.find((loot) => (loot as { kind: string }).kind === "treasure_map");
+    expect(unsupportedLoot).toBeUndefined();
+  });
 
-    updateSimulation(worldState, { ...neutralInput, interact: true }, FIXED_TIME_STEP);
-    expect(worldState.wallet.treasureMaps).toBe(0);
-    expect(worldState.treasureObjective.completedCount).toBe(1);
+  it("rotates world events through convoy, storm, and navy only", () => {
+    const worldState = createInitialWorldState();
+    worldState.spawnDirector.maxActive = 0;
+    worldState.spawnDirector.timer = 999;
+    worldState.eventDirector.activeKind = null;
+    worldState.eventDirector.remaining = 0;
+
+    const seenKinds: string[] = [];
+    for (let i = 0; i < 6; i += 1) {
+      worldState.eventDirector.timer = 0;
+      updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+      const activeKind = worldState.eventDirector.activeKind;
+      expect(activeKind).not.toBeNull();
+      if (!activeKind) {
+        throw new Error("Expected active event kind.");
+      }
+
+      seenKinds.push(activeKind);
+      const startedEvents = drainSimulationEvents(worldState).filter((event) => event.type === "world_event_started");
+      expect(startedEvents.length).toBeGreaterThan(0);
+      expect(startedEvents[0]).toEqual({ type: "world_event_started", kind: activeKind });
+
+      worldState.eventDirector.remaining = 0;
+      updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+      drainSimulationEvents(worldState);
+    }
+
+    expect(seenKinds).toEqual(["enemy_convoy", "storm", "navy_patrol", "enemy_convoy", "storm", "navy_patrol"]);
   });
 
   it("uses explicit enemy AI states including flee and line-up states", () => {

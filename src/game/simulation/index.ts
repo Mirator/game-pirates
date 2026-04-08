@@ -26,7 +26,6 @@ export type {
   ShipState,
   SpawnDirectorState,
   StormState,
-  TreasureObjectiveState,
   UpgradeState,
   WalletState,
   WaterContactState,

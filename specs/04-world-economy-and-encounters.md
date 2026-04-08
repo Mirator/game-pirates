@@ -17,7 +17,7 @@ Map zones:
 ## Island Types
 
 - Port island: repairs, upgrades, shop.
-- Treasure island: hidden chest or map objective.
+- Treasure island: hidden cache location.
 - Hostile island: guarded location or ambush zone.
 - Scenic island: visual variety and future hooks.
 
@@ -32,7 +32,6 @@ Loot types:
 - Gold: primary currency.
 - Cargo: sold at port.
 - Repair materials: consumed for repairs.
-- Treasure maps: optional objective item that queues treasure objectives.
 
 Loot sources:
 - Sunk enemy ships.
@@ -42,7 +41,7 @@ Loot sources:
 
 Economy rule:
 - Economy supports progression and clarity, not deep simulation.
-- Treasure map objectives consume one map when completed.
+- Rewards should cleanly feed the dock-upgrade loop.
 
 ## Enemy Types
 
@@ -73,7 +72,6 @@ Navy ship:
 ## World Events
 
 MVP events:
-- Treasure marker appears.
 - Enemy convoy crosses the map.
 - Storm area reduces visibility.
 - Navy patrol enters region.

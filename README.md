@@ -5,9 +5,9 @@ Current browser prototype for the pirate game design:
 - gravity-based ship buoyancy physics with arcade-weighted handling, follow camera, and broadside cannon combat
 - ballistic cannonballs and floating loot object water interaction
 - enemy spawn director (mixed merchant/raider/navy archetypes with staggered pressure and active enemy caps)
-- loot drops (gold, cargo, repair materials, and treasure maps)
+- loot drops (gold, cargo, and repair materials)
 - dock interaction + upgrade menu (Hull Reinforcement)
-- HUD with minimap, resources, reload timers, objective and prompts
+- HUD with minimap, resources, reload timers, and contextual prompts
 - synthesized WebAudio SFX for combat, loot, docking, repair, and upgrade
 
 ## Controls

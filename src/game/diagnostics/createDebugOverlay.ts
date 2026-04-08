@@ -7,7 +7,6 @@ interface DebugSnapshot {
   gold: number;
   repairMaterials: number;
   cargo: number;
-  treasureMaps: number;
   playerReloadLeft: number;
   playerReloadRight: number;
   burstActive: boolean;
@@ -67,7 +66,7 @@ export function createDebugOverlay(root: HTMLElement, target: Window = window): 
         `FPS ${snapshot.fps.toFixed(0)}\n` +
         `Player HP ${snapshot.playerHp.toFixed(0)} / ${snapshot.playerMaxHp.toFixed(0)}\n` +
         `Enemies ${snapshot.enemiesAlive} | Loot ${snapshot.lootCount}\n` +
-        `Gold ${snapshot.gold} | Mats ${snapshot.repairMaterials} | Cargo ${snapshot.cargo} | Maps ${snapshot.treasureMaps}\n` +
+        `Gold ${snapshot.gold} | Mats ${snapshot.repairMaterials} | Cargo ${snapshot.cargo}\n` +
         `Menu ${snapshot.menuOpen ? "OPEN" : "CLOSED"} | Storm ${snapshot.stormActive ? "YES" : "NO"}\n` +
         `Burst ${snapshot.burstActive ? "ON" : "OFF"} | Cooldown ${formatSeconds(snapshot.burstCooldown)}s\n` +
         `Event ${snapshot.activeEvent} | Combat ${snapshot.combatIntensity.toFixed(2)}\n` +

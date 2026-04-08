@@ -4,9 +4,9 @@ export type ShipStatus = "alive" | "sinking";
 export type ShipDamageState = "healthy" | "damaged" | "critical" | "sunk";
 export type EnemyAiState = "patrol" | "detect" | "chase" | "line_up_broadside" | "fire" | "flee";
 export type EnemyArchetype = "merchant" | "raider" | "navy";
-export type LootKind = "gold" | "repair_material" | "cargo" | "treasure_map";
+export type LootKind = "gold" | "repair_material" | "cargo";
 export type IslandKind = "port" | "treasure" | "hostile" | "scenic";
-export type WorldEventKind = "treasure_marker" | "enemy_convoy" | "storm" | "navy_patrol";
+export type WorldEventKind = "enemy_convoy" | "storm" | "navy_patrol";
 export type WaterContactState = "airborne" | "water_entry" | "submerged";
 export type CollisionLayer = "world_static" | "ships" | "projectiles" | "pickups_debris" | "vfx";
 
@@ -147,7 +147,6 @@ export interface WalletState {
   gold: number;
   repairMaterials: number;
   cargo: number;
-  treasureMaps: number;
 }
 
 export interface UpgradeState {
@@ -170,16 +169,6 @@ export interface SpawnDirectorState {
   initialSpawnDelay: number;
   staggerDelay: number;
   timer: number;
-}
-
-export interface TreasureObjectiveState {
-  active: boolean;
-  markerPosition: Vector2State;
-  targetIslandId: number | null;
-  rewardGold: number;
-  completedCount: number;
-  fromMap: boolean;
-  queuedMaps: number;
 }
 
 export interface StormState {
@@ -226,14 +215,12 @@ export type SimulationEvent =
   | { type: "ship_sunk"; owner: ShipOwner }
   | { type: "loot_pickup"; kind: LootKind; amount: number }
   | { type: "cargo_sold"; amount: number; goldGained: number }
-  | { type: "treasure_map_used" }
   | { type: "dock_open" }
   | { type: "dock_close" }
   | { type: "repair_used" }
   | { type: "burst_started" }
   | { type: "burst_ready" }
   | { type: "upgrade_purchased"; level: number }
-  | { type: "treasure_collected"; amount: number }
   | { type: "world_event_started"; kind: WorldEventKind };
 
 export interface WorldState {
@@ -255,7 +242,6 @@ export interface WorldState {
   port: PortState;
   burst: BurstState;
   spawnDirector: SpawnDirectorState;
-  treasureObjective: TreasureObjectiveState;
   storm: StormState;
   eventDirector: EventDirectorState;
   combatIntensity: number;

@@ -288,7 +288,6 @@ const loop = createLoop({
         gold: worldState.wallet.gold,
         repairMaterials: worldState.wallet.repairMaterials,
         cargo: worldState.wallet.cargo,
-        treasureMaps: worldState.wallet.treasureMaps,
         playerReloadLeft: worldState.player.reload.left,
         playerReloadRight: worldState.player.reload.right,
         burstActive: worldState.burst.active,
