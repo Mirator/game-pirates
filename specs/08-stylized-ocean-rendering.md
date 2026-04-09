@@ -29,6 +29,16 @@ The world can read as unlit geometry rather than a composed scene.
 - Preserve gameplay readability under varied camera angles.
 - Keep rendering practical for real-time browser gameplay.
 
+## Authority
+
+This spec is authoritative for lighting, sky, atmosphere, and ocean rendering
+behavior.
+
+## Dependencies
+
+- Spec 05 for art-direction alignment.
+- Spec 11 for simulation-owned water/physics authority boundaries.
+
 ## Rendering Scope and Ownership
 
 - This spec is the canonical render contract for scene lighting, sky,

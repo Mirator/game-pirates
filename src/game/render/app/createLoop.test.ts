@@ -126,4 +126,32 @@ describe("createLoop", () => {
     expect(frameDts[1]).toBeCloseTo(1 / 20, 6);
     expect(updateCount).toBe(3);
   });
+
+  it("throttles frame processing when maxFrameRate is set", () => {
+    const frameDts: number[] = [];
+    let updateCount = 0;
+
+    const loop = createLoop({
+      fixedStep: 1 / 60,
+      maxFrameDelta: 0.2,
+      maxFrameRate: 10,
+      update: () => {
+        updateCount += 1;
+      },
+      render: (frameDt) => {
+        frameDts.push(frameDt);
+      }
+    });
+
+    loop.start();
+    mockWindow.step(100);
+    mockWindow.step(116);
+    mockWindow.step(132);
+    mockWindow.step(149);
+    mockWindow.step(216);
+
+    expect(frameDts).toHaveLength(1);
+    expect(frameDts[0]).toBeCloseTo(0.116, 6);
+    expect(updateCount).toBe(6);
+  });
 });

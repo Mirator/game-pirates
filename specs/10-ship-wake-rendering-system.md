@@ -10,7 +10,12 @@ Implement a performant wake system for player and enemy ships that feels
 embedded in the water, scales with speed, and avoids the current
 "flat transparent quad" look.
 
-Cross-spec dependency:
+## Authority
+
+This spec is authoritative for wake visual-system behavior and per-ship wake
+runtime contracts.
+
+## Dependencies
 
 - Spec 11 provides authoritative ship physics state (position/heading/velocity)
   that wake sampling should consume.
@@ -410,7 +415,7 @@ High:
 - better turn response.
 - richer breakup and lighting response.
 
-## 9. Acceptance Criteria
+## Acceptance Criteria
 
 Visual:
 - wake no longer appears as a single transparent polygon.

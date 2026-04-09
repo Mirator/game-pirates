@@ -5,7 +5,12 @@
 Define player-facing handling and combat rules using the gravity-based physics
 model from Spec 11.
 
-Cross-spec dependency:
+## Authority
+
+This spec is authoritative for player-facing sailing controls and combat
+interaction rules.
+
+## Dependencies
 
 - Spec 11 is the canonical authority for gravity/buoyancy/collision foundations.
 - Spec 12 is the canonical authority for ship handling feel (throttle/turn/boost).
@@ -80,3 +85,9 @@ Core states:
 
 MVP still uses hull HP as the main health resource, with sinking and buoyancy
 loss handled by the physics system.
+
+## Acceptance Criteria
+
+- Controls listed in this spec work with the documented key mappings.
+- Combat loop supports broadside positioning, firing, and sinking feedback.
+- Damage states transition correctly and remain readable in HUD/feedback.

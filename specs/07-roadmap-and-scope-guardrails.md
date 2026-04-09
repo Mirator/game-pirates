@@ -5,7 +5,11 @@
 Protect delivery momentum by keeping physics and gameplay upgrades phased and
 test-gated.
 
-Cross-spec dependency:
+## Authority
+
+This spec is authoritative for phased delivery order and scope guardrails.
+
+## Dependencies
 
 - Spec 11 defines the gravity/buoyancy physics foundation rollout.
 - Spec 12 defines the ship handling rollout and feel targets.
@@ -63,3 +67,9 @@ Deliverables:
 - collisions feel consequential without pinball behavior.
 - floating pickups remain collectible and stable.
 - simulation remains stable under normal gameplay load.
+
+## Acceptance Criteria
+
+- Planned work items map to one of the defined delivery phases.
+- Scope-trap features are excluded from MVP implementation.
+- Build-first checklist remains green before phase expansion.

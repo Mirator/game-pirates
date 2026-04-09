@@ -4,6 +4,16 @@
 
 Define the playable world, rewards, enemies, and event structure.
 
+## Authority
+
+This spec is authoritative for world layout zones, loot economy loops, enemy
+archetype intent, and encounter/event catalog.
+
+## Dependencies
+
+- Spec 02 for MVP loop goals this world structure supports.
+- Spec 05 for UI/readability presentation of world and economy signals.
+
 ## World Structure
 
 Use a small open map, not mission-only levels.
@@ -81,3 +91,10 @@ Future events:
 - Port raid.
 - Faction conflict.
 - Bounty hunters targeting player.
+
+## Acceptance Criteria
+
+- MVP map contains the listed island types and playable zone progression.
+- Economy loop supports cargo selling, repairs, and upgrade flow at port.
+- Enemy archetypes and AI states are represented in gameplay behavior.
+- At least one active world-event type can trigger during normal play.

@@ -4,6 +4,16 @@
 
 Define what game we are building and what player fantasy we need to deliver.
 
+## Authority
+
+This spec is authoritative for product intent, player fantasy, and high-level
+success direction.
+
+## Dependencies
+
+- Spec 02 for the gameplay loop translation of this vision.
+- Spec 07 for delivery constraints and scope discipline.
+
 ## High Concept
 
 - Working title: Blackwake Isles
@@ -39,3 +49,10 @@ The player should feel like:
 A stylized browser pirate game where you sail a ship, fight enemies, collect
 loot, and upgrade your vessel in a compact open sea designed for future
 multiplayer expansion.
+
+## Acceptance Criteria
+
+- The project pitch, goals, and design pillars are consistent across README and
+  spec documents.
+- No feature proposal conflicts with the stated product fantasy.
+- MVP planning docs map back to at least one product goal in this spec.

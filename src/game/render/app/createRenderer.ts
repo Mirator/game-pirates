@@ -8,21 +8,26 @@ export interface RendererContext {
 }
 
 export function createRenderer(root: HTMLElement): RendererContext {
+  const lowPowerMode = import.meta.env.VITE_RENDER_LOW_POWER === "1";
+  const requestedPixelRatioCap = Number(import.meta.env.VITE_RENDER_PIXEL_RATIO_CAP);
+  const pixelRatioCap =
+    Number.isFinite(requestedPixelRatioCap) && requestedPixelRatioCap > 0 ? requestedPixelRatioCap : lowPowerMode ? 1 : 2;
   const renderer = new WebGLRenderer({
-    antialias: true,
-    alpha: false
+    antialias: !lowPowerMode,
+    alpha: false,
+    powerPreference: lowPowerMode ? "low-power" : "high-performance"
   });
 
   const applyRendererDefaults = (): void => {
     renderer.outputColorSpace = SRGBColorSpace;
     renderer.toneMapping = ACESFilmicToneMapping;
     renderer.toneMappingExposure = 1;
-    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.enabled = !lowPowerMode;
     renderer.shadowMap.type = PCFShadowMap;
   };
 
   applyRendererDefaults();
-  renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+  renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
   renderer.setSize(window.innerWidth, window.innerHeight);
 
   const canvas = renderer.domElement;
@@ -45,7 +50,7 @@ export function createRenderer(root: HTMLElement): RendererContext {
   canvas.addEventListener("webglcontextrestored", onContextRestored, false);
 
   const onResize = (): void => {
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio, pixelRatioCap));
     renderer.setSize(window.innerWidth, window.innerHeight);
   };
 

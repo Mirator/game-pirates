@@ -9,7 +9,13 @@ Ship Visual and Gameplay Representation Upgrade
 Define a clear, scalable standard for player and enemy ships so they look
 intentional, readable, and gameplay-relevant rather than placeholder objects.
 
-Cross-spec dependencies:
+## Authority
+
+This spec is authoritative for ship visual representation contracts and
+render-only presentation feedback.
+
+## Dependencies
+
 - Spec 03: Sailing and Combat (combat readability and broadside understanding).
 - Spec 05: Progression UX Art Audio (stylized art direction consistency).
 - Spec 06: Technical Architecture (render-only ownership for visual feedback).
@@ -140,8 +146,8 @@ Required behavior:
 - include very small idle bob/noise so ship never feels perfectly rigid.
 
 MVP recommended bounds:
-- roll clamp: up to `8-12°` (default `10°`).
-- pitch clamp: up to `3-5°` (default `4°`).
+- roll clamp: up to `8-12 deg` (default `10 deg`).
+- pitch clamp: up to `3-5 deg` (default `4 deg`).
 
 Authority boundary:
 - tilt is presentation-only in MVP.
@@ -277,7 +283,7 @@ class expansion.
   - cannon-side mount anchors
   - sail node references for render-only animation drivers.
 
-## 9. Acceptance Criteria
+## Acceptance Criteria
 
 ### Visual
 

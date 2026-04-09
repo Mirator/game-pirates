@@ -5,6 +5,16 @@
 Define player growth and the presentation layer needed for a strong pirate
 fantasy.
 
+## Authority
+
+This spec is authoritative for progression-facing UX surface requirements and
+audio/art direction targets.
+
+## Dependencies
+
+- Spec 02 and Spec 04 for loop/economy signals surfaced by HUD and menus.
+- Spec 08 and Spec 09 for render-specific implementation constraints.
+
 ## Progression
 
 Ship stats:
@@ -91,3 +101,10 @@ MVP audio set:
 - Intense combat music.
 
 Audio is a force multiplier for fantasy and game feel.
+
+## Acceptance Criteria
+
+- HUD contains every listed MVP element and remains readable on desktop/mobile.
+- Port and pause menu flows expose required progression actions.
+- Art direction remains consistent with stylized pirate-fantasy targets.
+- MVP audio events trigger for combat, loot, docking, and exploration states.

@@ -31,7 +31,12 @@ export default defineConfig({
     url: "http://127.0.0.1:4173",
     env: {
       ...process.env,
-      VITE_E2E_DEBUG: "1"
+      VITE_E2E_DEBUG: "1",
+      VITE_PHYSICS_TICK_HZ: process.env.VITE_PHYSICS_TICK_HZ ?? "30",
+      VITE_MAX_RENDER_FPS: process.env.VITE_MAX_RENDER_FPS ?? "8",
+      VITE_SKIP_3D_RENDER: process.env.VITE_SKIP_3D_RENDER ?? "1",
+      VITE_RENDER_LOW_POWER: process.env.VITE_RENDER_LOW_POWER ?? "1",
+      VITE_RENDER_PIXEL_RATIO_CAP: process.env.VITE_RENDER_PIXEL_RATIO_CAP ?? "1"
     },
     reuseExistingServer: true,
     timeout: 120_000

@@ -30,10 +30,19 @@ Current browser prototype for the pirate game design:
 - `npm run build`: type-check and production build
 - `npm run test`: run simulation unit tests
 - `npm run test:e2e`: run Playwright browser smoke tests (CPU-capped, single worker by default)
-- `npm run test:e2e:fast`: run Playwright tests with 50% worker parallelism
+- `npm run test:e2e:fast`: run Playwright tests with a single worker (CPU-safe)
 
 For custom caps you can set `E2E_WORKERS`, for example:
 - PowerShell: `$env:E2E_WORKERS=2; npm run test:e2e`
 
-Optional physics tick fallback:
-- set `VITE_PHYSICS_TICK_HZ=30` to run simulation at 30 Hz fixed step.
+E2E low-power defaults can be overridden when needed:
+- `VITE_MAX_RENDER_FPS` (default `8`) limits loop/render frequency.
+- `VITE_SKIP_3D_RENDER` (default `1`) disables WebGL draw calls during E2E while keeping simulation/debug state updates.
+- `VITE_RENDER_LOW_POWER` (default `1`) lowers renderer quality for test mode.
+- `VITE_RENDER_PIXEL_RATIO_CAP` (default `1`) caps render pixel ratio.
+- `VITE_PHYSICS_TICK_HZ` (default `30`) controls fixed-step simulation rate for E2E.
+
+## Specs Source Of Truth
+
+- The canonical specs live in `specs/`.
+- Do not rely on archived zip snapshots for authoritative requirements.

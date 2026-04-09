@@ -4,6 +4,16 @@
 
 Define the gameplay loops and the minimum feature set for a successful MVP.
 
+## Authority
+
+This spec is authoritative for MVP loop shape and minimum deliverable feature
+set.
+
+## Dependencies
+
+- Spec 01 for product vision and fantasy alignment.
+- Spec 03 and Spec 04 for concrete combat/world implementation details.
+
 ## Core Gameplay Loop
 
 ### Moment To Moment
@@ -66,3 +76,10 @@ The MVP is successful when:
 8. Player buys first upgrade.
 9. A more dangerous event appears farther from safety.
 10. Player chooses whether to push forward or cash out.
+
+## Acceptance Criteria
+
+- The shipped MVP includes every item in this spec's MVP scope list.
+- The first-10-minutes flow is playable end-to-end without missing systems.
+- Loop prompts and UI guidance are sufficient for a new player to complete one
+  dock-upgrade cycle.

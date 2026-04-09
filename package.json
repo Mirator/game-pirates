@@ -10,7 +10,7 @@
     "preview": "vite preview",
     "test": "vitest run",
     "test:e2e": "playwright test",
-    "test:e2e:fast": "playwright test --workers=50%",
+    "test:e2e:fast": "playwright test --workers=1",
     "test:coverage": "vitest run --coverage"
   },
   "keywords": [

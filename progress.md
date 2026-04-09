@@ -116,12 +116,10 @@ review it all and fix root issue
   - Previously alpha gradients were written to texture alpha channel only; Three.js alpha maps sample color channels, causing near-solid quads.
   - Updated wake/contact alpha textures to write grayscale into RGB channels (alpha kept opaque).
 - Replaced contact shadow and contact patch from rectangular planes to radial ellipse decals (circle geometry + non-uniform scale).
-- Added lphaTest on contact materials to tighten soft-edge cutoff and remove residual box edges.
-- Verified visually using fresh e2e screenshot: 	est-results/ship-readability-desktop.png (artifact removed).
-- Validation: 
-pm run test, 
-pm run test:e2e, 
-pm run build all pass.
+- Added `alphaTest` on contact materials to tighten soft-edge cutoff and remove residual box edges.
+- Verified visually using fresh e2e screenshot: `test-results/ship-readability-desktop.png` (artifact removed).
+- Validation:
+`npm run test`, `npm run test:e2e`, and `npm run build` all pass.
 
 ## Ship Visual Upgrade v2 (2026-04-08)
 - Implemented GLB-first ship asset path with procedural fallback:

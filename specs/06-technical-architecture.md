@@ -5,7 +5,12 @@
 Define architecture constraints for deterministic gameplay simulation,
 render-simulation separation, and multiplayer-ready data flow.
 
-Cross-spec dependencies:
+## Authority
+
+This spec is authoritative for simulation/render boundaries, fixed-step
+contracts, and architecture guardrails.
+
+## Dependencies
 
 - Spec 11 (physics authority).
 - Spec 12 (ship handling authority).
@@ -98,3 +103,10 @@ Future networking direction:
 - Server-authoritative simulation.
 - Client interpolation/prediction as needed.
 - Replicable input and world-state deltas.
+
+## Acceptance Criteria
+
+- Gameplay authority remains in simulation modules, not render/UI code.
+- Fixed-step update and interpolation contracts are upheld in runtime loop.
+- ECS state keeps stable IDs with player reserved as entity `0`.
+- Render systems consume simulation outputs without mutating authority state.

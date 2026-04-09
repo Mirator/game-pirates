@@ -35,6 +35,10 @@ const worldState = createInitialWorldState();
 const requestedPhysicsHz = Number(import.meta.env.VITE_PHYSICS_TICK_HZ);
 const selectedFixedStep = requestedPhysicsHz === 30 ? FIXED_TIME_STEP_30 : FIXED_TIME_STEP;
 worldState.physics.tickRateHz = selectedFixedStep === FIXED_TIME_STEP_30 ? 30 : 60;
+const requestedMaxRenderFps = Number(import.meta.env.VITE_MAX_RENDER_FPS);
+const maxRenderFps =
+  Number.isFinite(requestedMaxRenderFps) && requestedMaxRenderFps > 0 ? requestedMaxRenderFps : undefined;
+const shouldSkip3dRender = import.meta.env.VITE_SKIP_3D_RENDER === "1";
 const shouldExposeDebugHandles =
   import.meta.env.DEV && (import.meta.env.VITE_E2E_DEBUG === "1" || import.meta.env.VITE_DEBUG_WORLD === "1");
 const debugWindow = window as Window & {
@@ -248,6 +252,7 @@ capturePreviousSnapshot();
 const loop = createLoop({
   fixedStep: selectedFixedStep,
   maxFrameDelta: MAX_FRAME_DT,
+  maxFrameRate: maxRenderFps,
   beforeFixedUpdate: capturePreviousSnapshot,
   update: (dt) => {
     if (!uiLocked) {
@@ -305,7 +310,7 @@ const loop = createLoop({
       hud.update(worldState);
     }
 
-    if (!rendererContext.contextLost) {
+    if (!shouldSkip3dRender && !rendererContext.contextLost) {
       renderer.render(renderWorld.scene, renderWorld.camera);
     }
   }
