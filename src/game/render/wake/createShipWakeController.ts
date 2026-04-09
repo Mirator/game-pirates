@@ -510,15 +510,17 @@ class ShipWakeControllerImpl implements ShipWakeController {
 
     const speedAbs = Math.abs(this.speed);
     const speedNorm = clamp((speedAbs - this.tuning.minSpeedThreshold * 0.2) / 8, 0, 1);
+    const turnNorm = clamp(Math.abs(this.turnRate) * 0.045, 0, 1);
     const boostFactor = this.boosting ? 1 : 0;
-    const targetIntensity = clamp(speedNorm * 0.95 + boostFactor * 0.25 + clamp(Math.abs(this.turnRate) * 0.04, 0, 0.25), 0, 1);
+    const targetIntensity = clamp(speedNorm * 1.02 + turnNorm * 0.3 + boostFactor * 0.25, 0, 1);
     const follow = targetIntensity > this.liveIntensity ? 1 - Math.exp(-8.2 * dt) : 1 - Math.exp(-3.8 * dt);
     this.liveIntensity = lerp(this.liveIntensity, targetIntensity, follow);
     this.liveWidth =
       this.tuning.baseWakeWidth +
       speedAbs * this.tuning.widthBySpeedMultiplier +
+      turnNorm * this.tuning.baseWakeWidth * 0.45 +
       (this.boosting ? this.tuning.baseWakeWidth * 0.24 : 0);
-    this.liveLength = this.tuning.distortionLength * (0.6 + speedNorm * 1.2 + boostFactor * 0.2);
+    this.liveLength = this.tuning.distortionLength * (0.6 + speedNorm * 1.2 + turnNorm * 0.32 + boostFactor * 0.2);
 
     this.ageAndPruneSamples(dt);
     this.tryAddSample(speedAbs, speedNorm);
@@ -787,8 +789,9 @@ class ShipWakeControllerImpl implements ShipWakeController {
     this.sternMesh.position.set(sternPos.x, 0.055, sternPos.z);
     this.sternMesh.rotation.y = heading;
     const jitter = Math.sin(this.time * 3.6 + sternPos.x * 0.12 + sternPos.z * 0.11) * 0.04;
+    const turnNorm = clamp(Math.abs(this.turnRate) * 0.05, 0, 1);
     this.sternMesh.scale.set(
-      this.tuning.sternPatchWidth * (1 + speedNorm * 0.24 + (this.boosting ? 0.14 : 0)),
+      this.tuning.sternPatchWidth * (1 + speedNorm * 0.24 + turnNorm * 0.28 + (this.boosting ? 0.14 : 0)),
       this.tuning.sternPatchLength * (1 + speedNorm * 0.28),
       1
     );

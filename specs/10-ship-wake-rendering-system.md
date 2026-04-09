@@ -85,6 +85,7 @@ Requirements:
 - minimal stern disturbance at very low speed.
 - wake grows progressively with speed.
 - wake reduces when ship slows down.
+- turn rate must increase wake strength and side disturbance response.
 
 Inputs:
 - ship world position.
@@ -97,6 +98,8 @@ Input ownership rule:
 
 - Wake should derive from simulation-authoritative movement data rather than
   independent render-estimated velocity.
+- Turn-derived asymmetry must also consume simulation-authoritative turn/heading
+  deltas (not handcrafted visual-only randomization).
 
 ### 4.2 Stern Turbulence
 
@@ -199,7 +202,7 @@ Wake should react to turning.
 Requirements:
 - curved ship motion produces curved wake trail.
 - stronger turn rate may slightly widen stern turbulence.
-- optional asymmetry during hard turns.
+- hard turns should produce visible side-biased foam/disturbance asymmetry.
 
 This should emerge primarily from trail sampling, not handcrafted branch logic.
 
@@ -214,6 +217,11 @@ Parameters affected by speed:
 - wake opacity.
 - wake texture scroll speed.
 - spray intensity if enabled.
+
+Parameters also affected by turn intensity:
+- stern turbulence width.
+- side disturbance asymmetry.
+- wake width gain while turning.
 
 Suggested states:
 - idle.
@@ -385,6 +393,7 @@ Stern turbulence:
 Ribbon:
 - base wake width.
 - width by speed multiplier.
+- width by turn multiplier.
 - max wake lifetime.
 - alpha fade curve.
 - edge softness.
@@ -395,6 +404,7 @@ Disturbance:
 - foam tint amount.
 - distortion length.
 - distortion falloff.
+- turn asymmetry strength.
 
 ## 8. Quality Levels
 

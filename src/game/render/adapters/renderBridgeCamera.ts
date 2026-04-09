@@ -25,6 +25,22 @@ function clamp(value: number, min: number, max: number): number {
   return Math.min(max, Math.max(min, value));
 }
 
+function lerp(from: number, to: number, alpha: number): number {
+  return from + (to - from) * alpha;
+}
+
+function normalizeAngle(angle: number): number {
+  let wrapped = angle;
+  while (wrapped > Math.PI) wrapped -= Math.PI * 2;
+  while (wrapped < -Math.PI) wrapped += Math.PI * 2;
+  return wrapped;
+}
+
+function shortestAngleLerp(from: number, to: number, alpha: number): number {
+  const delta = normalizeAngle(to - from);
+  return normalizeAngle(from + delta * alpha);
+}
+
 function orientCameraWithCanonicalBasis(camera: PerspectiveCamera, lookTarget: Vector3): void {
   camera.up.set(CAMERA_WORLD_UP.x, CAMERA_WORLD_UP.y, CAMERA_WORLD_UP.z);
   camera.lookAt(lookTarget);
@@ -36,8 +52,17 @@ export function syncFollowCamera(
   playerPose: CameraPlayerPose,
   frameDt: number
 ): void {
-  bridge.cameraSmoothedHeading = playerPose.heading;
-  bridge.cameraHeadingInitialized = true;
+  if (!bridge.cameraHeadingInitialized) {
+    bridge.cameraSmoothedHeading = playerPose.heading;
+    bridge.cameraHeadingInitialized = true;
+  } else {
+    const headingFollowStrength = 1 - Math.exp(-13.5 * frameDt);
+    bridge.cameraSmoothedHeading = shortestAngleLerp(
+      bridge.cameraSmoothedHeading,
+      playerPose.heading,
+      headingFollowStrength
+    );
+  }
 
   const cameraForwardX = Math.sin(bridge.cameraSmoothedHeading);
   const cameraForwardZ = Math.cos(bridge.cameraSmoothedHeading);
@@ -70,9 +95,21 @@ export function syncFollowCamera(
   }
 
   const positionFollowStrength = 1 - Math.exp(-5.2 * frameDt);
+  const verticalFollowStrength = 1 - Math.exp(-2.35 * frameDt);
   const lookFollowStrength = 1 - Math.exp(-3.4 * frameDt);
 
-  bridge.camera.position.lerp(bridge.cameraDesiredPosition, positionFollowStrength);
+  bridge.camera.position.x = lerp(bridge.camera.position.x, bridge.cameraDesiredPosition.x, positionFollowStrength);
+  bridge.camera.position.z = lerp(bridge.camera.position.z, bridge.cameraDesiredPosition.z, positionFollowStrength);
+  bridge.camera.position.y = lerp(bridge.camera.position.y, bridge.cameraDesiredPosition.y, verticalFollowStrength);
   bridge.cameraLookTarget.lerp(bridge.cameraDesiredLookTarget, lookFollowStrength);
+
+  const targetFov = 58 + clamp(speedAbs * 0.25, 0, 5);
+  const fovFollowStrength = 1 - Math.exp(-4.6 * frameDt);
+  const nextFov = lerp(bridge.camera.fov, targetFov, fovFollowStrength);
+  if (Math.abs(nextFov - bridge.camera.fov) > 1e-4) {
+    bridge.camera.fov = nextFov;
+    bridge.camera.updateProjectionMatrix();
+  }
+
   orientCameraWithCanonicalBasis(bridge.camera, bridge.cameraLookTarget);
 }

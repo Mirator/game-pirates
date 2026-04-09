@@ -148,7 +148,11 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
           shallowColor: "#54b9cc",
           fresnelStrength: 1,
           wakeIntensity: 1,
-          foamThreshold: 0.46
+          foamThreshold: 0.46,
+          nearHullDarkeningStrength: 0.18,
+          nearHullDarkeningRadius: 7.5,
+          curvatureFoamStrength: 0.45,
+          wavePeakHighlightStrength: 0.22
         }),
         setQuality: () => {},
         updateTuning: () => {}
@@ -353,39 +357,49 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     expect(Math.abs(bobAtAlpha1 - bobAtAlpha0)).toBeGreaterThan(0.00004);
   });
 
-  it("tracks camera heading directly during small oscillations", () => {
+  it("tracks camera heading with bounded lag during small oscillations", () => {
     const worldState = createInitialWorldState();
     const interpolation = createInterpolationContext(worldState, 1);
     const bridge = createBridge();
 
     let previousHeading = 0;
+    let maxDelta = 0;
 
     for (let i = 0; i < 16; i += 1) {
       const heading = i % 2 === 0 ? -0.02 : 0.02;
       interpolation.previousSnapshot.player.heading = previousHeading;
       worldState.player.heading = heading;
       syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
-      expect(Math.abs(normalizeAngle(bridge.cameraSmoothedHeading - heading))).toBeLessThan(1e-6);
+      const delta = Math.abs(normalizeAngle(bridge.cameraSmoothedHeading - heading));
+      maxDelta = Math.max(maxDelta, delta);
+      expect(delta).toBeLessThan(0.08);
       previousHeading = heading;
     }
+
+    expect(maxDelta).toBeGreaterThan(0.01);
   });
 
-  it("keeps camera heading in lockstep during sustained turning", () => {
+  it("keeps camera heading stable with trailing lag during sustained turning", () => {
     const worldState = createInitialWorldState();
     const interpolation = createInterpolationContext(worldState, 1);
     const bridge = createBridge();
 
     let previousHeading = 0;
+    let lastDelta = 0;
 
     for (let i = 0; i < 12; i += 1) {
-      worldState.player.heading = previousHeading + 0.14;
+      worldState.player.heading = previousHeading + 0.08;
       interpolation.previousSnapshot.player.heading = previousHeading;
 
       syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
-      expect(Math.abs(normalizeAngle(bridge.cameraSmoothedHeading - worldState.player.heading))).toBeLessThan(1e-6);
+      lastDelta = Math.abs(normalizeAngle(bridge.cameraSmoothedHeading - worldState.player.heading));
+      expect(Number.isFinite(lastDelta)).toBe(true);
 
       previousHeading = worldState.player.heading;
     }
+
+    expect(lastDelta).toBeGreaterThan(0.02);
+    expect(lastDelta).toBeLessThan(0.35);
   });
 
   it("keeps default chase-camera offset when orbit offsets are zero", () => {
@@ -400,6 +414,29 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     expect(offsetX).toBeCloseTo(0, 4);
     expect(offsetZ).toBeCloseTo(-12, 4);
     expect(bridge.camera.position.y).toBeCloseTo(6.7, 4);
+  });
+
+  it("ramps camera field-of-view with speed while staying bounded", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.heading = 0;
+    worldState.player.linearVelocity.x = 0;
+    worldState.player.linearVelocity.z = 0;
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    for (let i = 0; i < 8; i += 1) {
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+    const idleFov = bridge.camera.fov;
+
+    worldState.player.linearVelocity.z = 32;
+    for (let i = 0; i < 40; i += 1) {
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+    }
+    const highSpeedFov = bridge.camera.fov;
+
+    expect(highSpeedFov).toBeGreaterThan(idleFov + 2);
+    expect(highSpeedFov).toBeLessThanOrEqual(63.05);
   });
 
   it("applies orbit yaw offset by rotating camera azimuth around the ship", () => {
@@ -493,8 +530,8 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
 
     expect(Math.abs(bridge.playerMesh.rotation.x)).toBeLessThan(1e-6);
     expect(Math.abs(bridge.playerMesh.rotation.z)).toBeLessThan(1e-6);
-    expect(Math.abs(bridge.playerVisual.presentation.rotation.x)).toBeGreaterThan(0.01);
-    expect(Math.abs(bridge.playerVisual.presentation.rotation.z)).toBeGreaterThan(0.03);
+    expect(Math.abs(bridge.playerVisual.presentation.rotation.x)).toBeGreaterThan(0.006);
+    expect(Math.abs(bridge.playerVisual.presentation.rotation.z)).toBeGreaterThan(0.012);
     expect(Math.abs(bridge.playerVisual.presentation.position.y)).toBeGreaterThan(0.001);
     const call = environmentSync.mock.calls.at(-1);
     const wakeInfluences = call?.[1]?.wakeInfluences as Array<{ intensity: number }> | undefined;

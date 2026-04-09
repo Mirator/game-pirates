@@ -231,6 +231,8 @@ The ocean must present:
 
 - Broad, slow primary swells.
 - Smaller, faster secondary detail.
+- Directional wave travel that is readable from gameplay camera.
+- Visible horizon-line motion, not random undirected wobble.
 - Stronger light response at glancing camera angles.
 - Clear deep/shallow color variation.
 - Readable interaction around player ship.
@@ -242,6 +244,10 @@ The ocean must present:
 
 - Drive water movement primarily in shader logic.
 - Use directional Gerstner-style displacement with layered components.
+- Required hierarchy for shipping tiers:
+  - 1 dominant long swell (slow, largest amplitude),
+  - 2 to 3 secondary directional waves (medium scale),
+  - 1 subtle fast detail layer.
 - Required: at least 2 wave sets; target 3 to 4 in higher quality tiers.
 - Optional tertiary micro motion may be normal-only.
 
@@ -251,6 +257,10 @@ The ocean must present:
 - Include Fresnel term for grazing-angle highlight lift.
 - Include directional sun response and specular breakup.
 - Blend deep and shallow colors for shape and depth cues.
+- Add near-hull water darkening driven by player/ship proximity.
+- Add foam response from local wave curvature (crest/curvature signal), not only
+  wake masks.
+- Add subtle wave-peak highlight cues near ship for motion readability.
 
 #### 3) Normal Detail
 
@@ -274,10 +284,11 @@ Required:
 - Visible wake trail behind player ship while moving.
 - Brighter/foam disturbance near hull while moving.
 - Stronger wake response during boost (`burst.active`).
+- Turn intensity must affect wake width/foam intensity and permit side-biased
+  disturbance during hard turns.
 
 Optional future:
 
-- Turn-asymmetric wake.
 - Cannonball splashes.
 - Collision splashes.
 
@@ -286,6 +297,11 @@ Optional future:
 - Ship silhouette remains readable against water.
 - Highlights and foam must not hide gameplay-critical elements.
 - Wave aggression must stay within readability bounds.
+- Follow camera should include:
+  - position smoothing,
+  - slight rotational heading lag,
+  - small speed-based FOV increase (`~58 -> ~63`),
+  - optional minor vertical lag to emphasize wave motion.
 
 ### Water Technical Requirements
 
@@ -348,7 +364,7 @@ Render-facing APIs and config contracts:
 - `AtmospherePresetId = "clearDay" | "goldenHour" | "overcast" | "dusk" | "storm"`.
 - `AtmosphereRenderConfig` and `AtmosphereTuningControls` in render config path.
 - Environment sync context includes interpolated player pose and camera
-  position.
+  position and player-influence data used by water shading (near-hull response).
 - Atmosphere profile system supports base preset + blendable storm influence.
 - `EnvironmentObjects` exposes `water` and `lighting` control surfaces.
 - `lighting` surface supports `getConfig()`, `setPreset(id)`, and
@@ -386,6 +402,10 @@ Expose and support runtime updates for:
 - `fresnelStrength`
 - `wakeIntensity`
 - `foamThreshold`
+- `nearHullDarkeningStrength`
+- `nearHullDarkeningRadius`
+- `curvatureFoamStrength`
+- `wavePeakHighlightStrength`
 
 ## Performance Constraints and Defaults
 
@@ -417,6 +437,9 @@ Optimization levers:
 - Angle-dependent water highlights are visible.
 - Shoreline areas are clearly differentiated from deep water.
 - Ship movement produces visible wake and disturbance.
+- Near-hull water darkening and curvature foam are visible without overpowering
+  readability.
+- Turning creates asymmetric side disturbance in wake/foam at higher turn rates.
 - Overall scene has a recognizable adventurous maritime mood.
 
 ### Technical

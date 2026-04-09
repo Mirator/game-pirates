@@ -129,6 +129,9 @@ Motion source contract:
   locomotion.
 - Added tilt/sail/contact effects must be applied on render presentation nodes
   only and must not write into gameplay authority.
+- Physics pose remains the primary visual source; readability adjustments may use
+  bounded visual exaggeration (`~1.1-1.2x`) but must never contradict
+  authoritative buoyancy pose.
 
 ### 4.1 Tilt (Roll + Pitch)
 
@@ -136,14 +139,18 @@ Ship tilt is a visual feedback layer that must communicate momentum without
 hurting readability.
 
 Required behavior:
-- roll is driven primarily by actual yaw turn rate (preferred) or normalized
-  turn input.
+- roll/pitch should start from simulation-authoritative buoyancy pose.
+- roll feedback is driven primarily by actual yaw turn rate (preferred) or
+  normalized turn input.
 - left turn leans hull slightly to the right, right turn leans slightly to the
   left.
 - pitch is driven by longitudinal acceleration: accelerating lifts bow slightly,
   decelerating lowers bow slightly.
 - apply smoothing (`lerp`/damp/spring) to avoid snapping and jitter.
 - include very small idle bob/noise so ship never feels perfectly rigid.
+- synthetic bob/noise must remain subordinate to physics pitch/roll cues.
+- apply bounded visual exaggeration multiplier (`~1.15` default, max `1.2`).
+- add subtle speed-scaled outward lean in turns (`~2.5 deg` max) for readability.
 
 MVP recommended bounds:
 - roll clamp: up to `8-12 deg` (default `10 deg`).
@@ -162,7 +169,8 @@ Required behavior:
 - drive sail state from `speedFactor = currentSpeed / maxSpeed`.
 - low speed: looser/resting sail pose.
 - high speed: more open/tensioned sail pose.
-- turning adds subtle delayed sail sway.
+- sail sway should primarily follow velocity direction/slip angle, with optional
+  small turn-rate contribution.
 - add low-amplitude flutter/oscillation to avoid static presentation.
 - smooth all sail transitions to prevent popping on rapid speed changes.
 
@@ -192,6 +200,8 @@ Required behavior:
 - opacity must be controllable independently from scene-light intensity.
 - solution should stay cheap (textured quad/decal/projected circle), not complex
   dynamic shadowing.
+- ship-coupling readability pass should increase contact contrast moderately
+  (`~20%` opacity range uplift) while preserving subtle stylization.
 
 Tuning notes:
 - optional subtle scale modulation from tilt/bob is allowed.
@@ -297,6 +307,8 @@ class expansion.
 - Ships visibly react to movement and turning.
 - Ships visibly show bounded tilt and sail response without visual snapping.
 - Ships appear grounded to water with stable under-hull contact cue.
+- Visual tilt remains physics-led with bounded readability exaggeration and no
+  authority conflicts.
 - Ships provide clear visual combat feedback.
 - Player can identify threats at distance.
 

@@ -42,6 +42,10 @@ export interface WaterTuningControls {
   fresnelStrength: number;
   wakeIntensity: number;
   foamThreshold: number;
+  nearHullDarkeningStrength: number;
+  nearHullDarkeningRadius: number;
+  curvatureFoamStrength: number;
+  wavePeakHighlightStrength: number;
 }
 
 export interface WaterRenderConfig {
@@ -63,7 +67,11 @@ const DEFAULT_TUNING: WaterTuningControls = {
   shallowColor: "#54b9cc",
   fresnelStrength: 1,
   wakeIntensity: 1,
-  foamThreshold: 0.46
+  foamThreshold: 0.46,
+  nearHullDarkeningStrength: 0.18,
+  nearHullDarkeningRadius: 7.5,
+  curvatureFoamStrength: 0.45,
+  wavePeakHighlightStrength: 0.22
 };
 
 const HIGH_WAVES: readonly WaterWaveComponent[] = DEFAULT_WATER_SURFACE_WAVES;
@@ -156,6 +164,18 @@ export function sanitizeWaterTuning(next: Partial<WaterTuningControls>, current:
     shallowColor: next.shallowColor ?? current.shallowColor,
     fresnelStrength: clamp(next.fresnelStrength ?? current.fresnelStrength, 0.2, 2.4),
     wakeIntensity: clamp(next.wakeIntensity ?? current.wakeIntensity, 0, 2.5),
-    foamThreshold: clamp(next.foamThreshold ?? current.foamThreshold, 0.05, 0.95)
+    foamThreshold: clamp(next.foamThreshold ?? current.foamThreshold, 0.05, 0.95),
+    nearHullDarkeningStrength: clamp(
+      next.nearHullDarkeningStrength ?? current.nearHullDarkeningStrength,
+      0,
+      1.2
+    ),
+    nearHullDarkeningRadius: clamp(next.nearHullDarkeningRadius ?? current.nearHullDarkeningRadius, 2, 20),
+    curvatureFoamStrength: clamp(next.curvatureFoamStrength ?? current.curvatureFoamStrength, 0, 2),
+    wavePeakHighlightStrength: clamp(
+      next.wavePeakHighlightStrength ?? current.wavePeakHighlightStrength,
+      0,
+      1
+    )
   };
 }

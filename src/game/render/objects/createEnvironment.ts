@@ -356,6 +356,11 @@ uniform vec4 uWakeTuning[MAX_WAKE_SOURCES];
 uniform float uWakeDistortionStrength;
 uniform float uWakeFoamTintStrength;
 uniform float uFoamThreshold;
+uniform vec2 uPlayerPos;
+uniform float uNearHullDarkeningStrength;
+uniform float uNearHullDarkeningRadius;
+uniform float uCurvatureFoamStrength;
+uniform float uWavePeakHighlightStrength;
 
 uniform int uShorelineEnabled;
 uniform int uIslandCount;
@@ -432,14 +437,15 @@ float computeWakeFactor(out vec2 wakeFlow, out float wakeFoamTint) {
     float lengthMask = 1.0 - smoothstep(trailLength * 0.04, trailLength * 0.78, along);
     float sternMask = 1.0 - smoothstep(width * 0.12, width * 0.72, length(toFragment));
     float swirl = 0.92 + sin((along * 0.55 + uTime * 2.4) + lateral * 0.75) * 0.08;
+    float signedLateral = clamp(lateral / (width * 1.2), -1.0, 1.0);
+    float asymmetry = 1.0 + signedLateral * clamp(turn, -1.0, 1.0) * 0.35;
 
-    float ribbonContribution = widthMask * lengthMask * falloff * 0.24;
+    float ribbonContribution = widthMask * lengthMask * falloff * 0.24 * asymmetry;
     float sternContribution = sternMask * 0.48;
     float contribution = max(ribbonContribution, sternContribution) * intensity * swirl;
     wakeFactor += contribution;
     wakeFoamTint += contribution * foamTint * 0.55;
 
-    float signedLateral = clamp(lateral / (width * 1.2), -1.0, 1.0);
     wakeFlow += right * signedLateral * contribution * (0.6 + abs(turn) * 0.4) * normalBoost * 0.65;
   }
 
@@ -468,7 +474,14 @@ void main() {
   surfaceNormal = normalize(surfaceNormal + vec3(wakeFlow.x, wakeFactor * uWakeDistortionStrength, wakeFlow.y));
   float foamFactor = smoothstep(uFoamThreshold + 0.2, 0.95, wakeFactor);
 
+  float playerDistance = distance(vWorldPos.xz, uPlayerPos);
+  float nearHullMask = 1.0 - smoothstep(0.0, max(0.001, uNearHullDarkeningRadius), playerDistance);
+  float curvatureSignal = max(0.0, 1.0 - surfaceNormal.y);
+  float curvatureFoam = smoothstep(0.12, 0.46, curvatureSignal) * uCurvatureFoamStrength;
+  float wavePeakHighlight = smoothstep(0.22, 0.58, vWorldPos.y) * uWavePeakHighlightStrength * (0.45 + nearHullMask * 0.55);
+
   vec3 baseColor = mix(uDeepColor, uShallowColor, clamp(shorelineMask + wakeFactor * 0.045, 0.0, 1.0));
+  baseColor *= 1.0 - nearHullMask * uNearHullDarkeningStrength;
   baseColor = mix(baseColor, uStormColor, clamp(uStormBlend, 0.0, 1.0) * 0.72);
 
   float ndv = max(0.0, dot(surfaceNormal, viewDirection));
@@ -479,10 +492,11 @@ void main() {
   vec3 finalColor = baseColor;
   finalColor += fresnel * vec3(0.3, 0.46, 0.62);
   finalColor += specular * vec3(1.0, 0.95, 0.84);
+  finalColor += vec3(0.08, 0.12, 0.14) * wavePeakHighlight;
   finalColor = mix(
     finalColor,
     uFoamColor,
-    clamp(foamFactor * (0.16 + wakeFoamTint * uWakeFoamTintStrength), 0.0, 0.28)
+    clamp(foamFactor * (0.16 + wakeFoamTint * uWakeFoamTintStrength) + curvatureFoam * 0.24, 0.0, 0.36)
   );
 
   gl_FragColor = vec4(finalColor, 1.0);
@@ -691,6 +705,11 @@ export function createEnvironment(
     uWakeDistortionStrength: { value: 0.055 },
     uWakeFoamTintStrength: { value: 0.18 },
     uFoamThreshold: { value: waterConfig.tuning.foamThreshold },
+    uPlayerPos: { value: new Vector2() },
+    uNearHullDarkeningStrength: { value: waterConfig.tuning.nearHullDarkeningStrength },
+    uNearHullDarkeningRadius: { value: waterConfig.tuning.nearHullDarkeningRadius },
+    uCurvatureFoamStrength: { value: waterConfig.tuning.curvatureFoamStrength },
+    uWavePeakHighlightStrength: { value: waterConfig.tuning.wavePeakHighlightStrength },
     uShorelineEnabled: { value: 1 },
     uIslandCount: { value: 0 },
     uIslandData: { value: islandData },
@@ -758,9 +777,13 @@ export function createEnvironment(
     waterUniforms.uFresnelPower.value = waterPreset.fresnelPower;
     waterUniforms.uSpecularStrength.value = waterPreset.specularStrength;
     waterUniforms.uSpecularExponent.value = waterPreset.specularExponent;
-    waterUniforms.uWakeDistortionStrength.value = 0.028 + waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity * 0.03;
-    waterUniforms.uWakeFoamTintStrength.value = 0.08 + waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity * 0.09;
+    waterUniforms.uWakeDistortionStrength.value = 0.034 + waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity * 0.036;
+    waterUniforms.uWakeFoamTintStrength.value = 0.096 + waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity * 0.108;
     waterUniforms.uFoamThreshold.value = waterConfig.tuning.foamThreshold;
+    waterUniforms.uNearHullDarkeningStrength.value = waterConfig.tuning.nearHullDarkeningStrength;
+    waterUniforms.uNearHullDarkeningRadius.value = waterConfig.tuning.nearHullDarkeningRadius;
+    waterUniforms.uCurvatureFoamStrength.value = waterConfig.tuning.curvatureFoamStrength;
+    waterUniforms.uWavePeakHighlightStrength.value = waterConfig.tuning.wavePeakHighlightStrength;
     waterUniforms.uShorelineEnabled.value = waterPreset.shorelineEnabled ? 1 : 0;
     waterUniforms.uShorelineStrength.value = waterPreset.shorelineStrength;
     waterUniforms.uDeepColor.value.set(waterConfig.tuning.deepColor);
@@ -921,7 +944,11 @@ export function createEnvironment(
         shallowColor: waterConfig.tuning.shallowColor,
         fresnelStrength: waterConfig.tuning.fresnelStrength,
         wakeIntensity: waterConfig.tuning.wakeIntensity,
-        foamThreshold: waterConfig.tuning.foamThreshold
+        foamThreshold: waterConfig.tuning.foamThreshold,
+        nearHullDarkeningStrength: waterConfig.tuning.nearHullDarkeningStrength,
+        nearHullDarkeningRadius: waterConfig.tuning.nearHullDarkeningRadius,
+        curvatureFoamStrength: waterConfig.tuning.curvatureFoamStrength,
+        wavePeakHighlightStrength: waterConfig.tuning.wavePeakHighlightStrength
       }),
       setQuality: (quality) => {
         if (disposed) {
@@ -1024,6 +1051,7 @@ export function createEnvironment(
       water.position.set(context.cameraPosition.x, 0, context.cameraPosition.z);
       waterUniforms.uTime.value = context.renderTime;
       waterUniforms.uCameraPos.value.set(context.cameraPosition.x, context.cameraPosition.y, context.cameraPosition.z);
+      waterUniforms.uPlayerPos.value.set(context.playerPose.x, context.playerPose.z);
       const wakeInfluences = context.wakeInfluences ?? [];
       const wakeCount = Math.min(WATER_MAX_WAKE_SOURCES, wakeInfluences.length);
       waterUniforms.uWakeSourceCount.value = wakeCount;

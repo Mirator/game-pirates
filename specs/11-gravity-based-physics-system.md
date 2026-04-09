@@ -103,6 +103,12 @@ Ships are rigid floating bodies with:
 - Multiple probes across hull (bow/stern left/right plus optional center).
 - Probe submersion below sampled water height creates upward force.
 - Uneven support naturally produces pitch and roll.
+- Bow probes may use a moderately stronger response than stern probes so bow
+  entry into waves reads earlier than stern recovery.
+- Small micro-submersion values should be ignored to suppress high-frequency
+  jitter from tiny wave noise.
+- Vertical ship displacement authority remains buoyancy-driven with no
+  presentation override path.
 
 ### Motion and Turning
 

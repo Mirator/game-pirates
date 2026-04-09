@@ -172,7 +172,7 @@ describe("updateSimulation ECS pipeline", () => {
 
     step(worldState, { ...neutralInput, turn: 1 }, 60);
     const turnDelta = Math.abs(normalizeAngle(worldState.player.heading - startHeading));
-    expect(turnDelta).toBeLessThan(0.25);
+    expect(turnDelta).toBeLessThan(0.18);
   });
 
   it("peaks initial turn authority at medium speed and weakens at low/high speed", () => {
@@ -199,9 +199,23 @@ describe("updateSimulation ECS pipeline", () => {
     const mediumTurnRate = Math.abs(mediumSpeedWorld.player.angularVelocity);
     const highTurnRate = Math.abs(highSpeedWorld.player.angularVelocity);
 
-    expect(lowTurnRate).toBeGreaterThan(0.01);
+    expect(lowTurnRate).toBeGreaterThan(0.006);
     expect(mediumTurnRate).toBeGreaterThan(lowTurnRate);
     expect(mediumTurnRate).toBeGreaterThan(highTurnRate);
+  });
+
+  it("ramps acceleration across initial throttle-up frames instead of instant full force", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    step(worldState, { ...neutralInput, throttle: 1 }, 1);
+    const firstFrameSpeed = Math.abs(worldState.player.speed);
+    step(worldState, { ...neutralInput, throttle: 1 }, 6);
+    const followupSpeed = Math.abs(worldState.player.speed);
+
+    expect(firstFrameSpeed).toBeGreaterThan(0);
+    expect(followupSpeed).toBeGreaterThan(firstFrameSpeed);
+    expect(firstFrameSpeed).toBeLessThan(followupSpeed * 0.55);
   });
 
   it("applies boost turning tradeoff at matched speed", () => {
@@ -479,6 +493,22 @@ describe("updateSimulation ECS pipeline", () => {
     const waterAfterStep = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
     expect(worldState.player.position.y).toBeGreaterThanOrEqual(waterAfterStep - SHIP_SAFE_SUBMERGE_DEPTH - 1e-6);
     expect(worldState.player.linearVelocity.y).toBeGreaterThanOrEqual(-0.35 - 1e-6);
+  });
+
+  it("biases early buoyancy pitch response toward the bow while keeping overshoot stable", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    const waterAtPlayer = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
+    worldState.player.position.y = waterAtPlayer - 0.34;
+    worldState.player.pitch = 0;
+    worldState.player.pitchVelocity = 0;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+    expect(worldState.player.pitchVelocity).toBeGreaterThan(0);
+
+    step(worldState, neutralInput, 90);
+    expect(Math.abs(worldState.player.pitch)).toBeLessThan(0.2);
   });
 
   it("collects loot with interact before docking when both are possible", () => {

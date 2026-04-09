@@ -8,6 +8,7 @@ import {
   MOVEMENT_MAX_TURN_RATE,
   MOVEMENT_REVERSE_ACCEL_MULT,
   MOVEMENT_REVERSE_SPEED_MULT,
+  MOVEMENT_THROTTLE_RESPONSE,
   MOVEMENT_TURN_ACCEL,
   MOVEMENT_TURN_HIGH_SPEED_MULT,
   MOVEMENT_TURN_IDLE_ANGULAR_CAP,
@@ -28,6 +29,11 @@ import { DEFAULT_WATER_SURFACE_TUNING, DEFAULT_WATER_SURFACE_WAVES } from "../..
 import { sampleWaterHeight } from "../../../physics/waterSurface";
 import { clamp, normalizeAngle } from "../math";
 import type { WorldWithEcs } from "../types";
+
+const BUOYANCY_VERTICAL_RESPONSE_MULT = 1.25;
+const BUOYANCY_BOW_PROBE_MULT = 1.12;
+const BUOYANCY_STERN_PROBE_MULT = 0.92;
+const BUOYANCY_MICRO_SUBMERGE_THRESHOLD = 0.015;
 
 export interface MovementScales {
   accelerationScale: number;
@@ -97,8 +103,10 @@ export function updateShipPhysics(
   const vz = ship.linearVelocity.z;
   const vy = ship.linearVelocity.y;
 
-  const throttleInput = clamp(throttle, -1, 1);
+  const targetThrottleInput = clamp(throttle, -1, 1);
   const turnInput = clamp(turn, -1, 1);
+  const throttleFollow = clamp(1 - Math.exp(-MOVEMENT_THROTTLE_RESPONSE * Math.max(0, dt)), 0, 1);
+  const throttleInput = lerp(ship.throttle, targetThrottleInput, throttleFollow);
 
   let forwardSpeed = vx * f.x + vz * f.z;
   let lateralSpeed = vx * l.x + vz * l.z;
@@ -187,9 +195,18 @@ export function updateShipPhysics(
     const ph =
       ship.position.y + probe.localOffset.y + ship.pitch * probe.localOffset.z * 0.58 - ship.roll * probe.localOffset.x * 0.58;
     const sub = wh - ph;
-    if (sub <= 0) continue;
+    if (sub <= BUOYANCY_MICRO_SUBMERGE_THRESHOLD) continue;
     submerged += 1;
-    const b = sub * ship.buoyancyStrength * probe.weight * worldState.physics.waterDensityMultiplier * (1 - ship.buoyancyLoss);
+    const longitudinalProbeScale =
+      probe.localOffset.z > 0.15 ? BUOYANCY_BOW_PROBE_MULT : probe.localOffset.z < -0.15 ? BUOYANCY_STERN_PROBE_MULT : 1;
+    const b =
+      sub *
+      ship.buoyancyStrength *
+      probe.weight *
+      worldState.physics.waterDensityMultiplier *
+      (1 - ship.buoyancyLoss) *
+      BUOYANCY_VERTICAL_RESPONSE_MULT *
+      longitudinalProbeScale;
     fy += b;
     pitchT += b * probe.localOffset.z * 0.03;
     rollT += -b * probe.localOffset.x * 0.03;
@@ -209,8 +226,8 @@ export function updateShipPhysics(
   ship.heading = normalizeAngle(ship.heading + ship.angularVelocity * dt);
   ship.pitch = clamp(ship.pitch + ship.pitchVelocity * dt, -0.36, 0.36);
   ship.roll = clamp(ship.roll + ship.rollVelocity * dt, -0.42, 0.42);
-  ship.pitch += -ship.pitch * clamp(dt * 0.8, 0, 1);
-  ship.roll += -ship.roll * clamp(dt * 0.85, 0, 1);
+  ship.pitch += -ship.pitch * clamp(dt * 0.6, 0, 1);
+  ship.roll += -ship.roll * clamp(dt * 0.65, 0, 1);
 
   ship.position.x += ship.linearVelocity.x * dt;
   ship.position.y = clamp(ship.position.y + ship.linearVelocity.y * dt, -8, 6);

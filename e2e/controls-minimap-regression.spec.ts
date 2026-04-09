@@ -288,7 +288,7 @@ test("controls + minimap regression: Q/E side mapping, A/D direction, north-up m
 
   expect(result.minimapStaticDiffRatio).toBeLessThan(0.03);
   expect(result.minimapCenterDiffRatio).toBeGreaterThan(0.0015);
-  expect(result.turnDeltaD).toBeLessThan(-0.02);
+  expect(result.turnDeltaD).toBeLessThan(-0.015);
   expect(result.turnDeltaA).toBeGreaterThan(0.002);
   expect(result.cameraHeadingOffsetAbs).toBeLessThan(0.03);
   expect(result.cameraProjectionX).toBeGreaterThan(0);

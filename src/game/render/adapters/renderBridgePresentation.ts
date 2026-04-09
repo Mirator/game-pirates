@@ -2,15 +2,19 @@ import { MOVEMENT_MAX_SPEED, MOVEMENT_MAX_TURN_RATE, SINK_DURATION, type ShipSta
 import type { ShipVisual } from "../objects/createShipMesh";
 
 const DEG_TO_RAD = Math.PI / 180;
-const ROLL_MAX = 10 * DEG_TO_RAD;
-const PITCH_MAX = 4 * DEG_TO_RAD;
+const VISUAL_TILT_EXAGGERATION = 1.15;
+const ROLL_FEEDBACK_MAX = 5 * DEG_TO_RAD;
+const PITCH_FEEDBACK_MAX = 2.2 * DEG_TO_RAD;
+const ROLL_VISUAL_CLAMP = 12 * DEG_TO_RAD;
+const PITCH_VISUAL_CLAMP = 5 * DEG_TO_RAD;
+const OUTWARD_LEAN_MAX = 2.5 * DEG_TO_RAD;
 const ROLL_DAMPING = 10;
 const PITCH_DAMPING = 9;
 const PITCH_ACCEL_REFERENCE = 36;
-const BOB_BASE_AMPLITUDE = 0.012;
-const BOB_SPEED_AMPLITUDE = 0.006;
-const IDLE_ROLL_NOISE_MAX = 0.5 * DEG_TO_RAD;
-const IDLE_PITCH_NOISE_MAX = 0.35 * DEG_TO_RAD;
+const BOB_BASE_AMPLITUDE = 0.008;
+const BOB_SPEED_AMPLITUDE = 0.004;
+const IDLE_ROLL_NOISE_MAX = 0.22 * DEG_TO_RAD;
+const IDLE_PITCH_NOISE_MAX = 0.16 * DEG_TO_RAD;
 const SAIL_TENSION_DAMPING = 7.5;
 const SAIL_SWAY_DAMPING = 4.4;
 const SAIL_FLUTTER_DAMPING = 8.6;
@@ -45,6 +49,7 @@ export interface ShipPresentationPose {
   pitch?: number;
   roll?: number;
   speed: number;
+  drift: number;
   turnRate: number;
 }
 
@@ -104,18 +109,23 @@ export function applyShipPose(
   presentation.speedBlend = dampExp(presentation.speedBlend, speedBlendTarget, 8.4, frameDt);
 
   const turnNorm = clamp(pose.turnRate / Math.max(1e-5, MOVEMENT_MAX_TURN_RATE), -1, 1);
-  const targetRoll = clamp(-turnNorm * ROLL_MAX, -ROLL_MAX, ROLL_MAX);
+  const outwardLean = turnNorm * speedBlendTarget * OUTWARD_LEAN_MAX;
+  const targetRoll = clamp(-turnNorm * ROLL_FEEDBACK_MAX + outwardLean, -ROLL_FEEDBACK_MAX, ROLL_FEEDBACK_MAX);
   presentation.smoothedRoll = dampExp(presentation.smoothedRoll, targetRoll, ROLL_DAMPING, frameDt);
 
   const forwardAcceleration = (pose.speed - presentation.previousForwardSpeed) / Math.max(frameDt, 1e-5);
   presentation.previousForwardSpeed = pose.speed;
-  const targetPitch = clamp(-(forwardAcceleration / PITCH_ACCEL_REFERENCE) * PITCH_MAX, -PITCH_MAX, PITCH_MAX);
+  const targetPitch = clamp(
+    -(forwardAcceleration / PITCH_ACCEL_REFERENCE) * PITCH_FEEDBACK_MAX,
+    -PITCH_FEEDBACK_MAX,
+    PITCH_FEEDBACK_MAX
+  );
   presentation.smoothedPitch = dampExp(presentation.smoothedPitch, targetPitch, PITCH_DAMPING, frameDt);
 
   const bobPrimary =
     Math.sin(renderTime * 1.85 + presentation.bobPhase + pose.x * 0.02) *
     (BOB_BASE_AMPLITUDE + presentation.speedBlend * BOB_SPEED_AMPLITUDE);
-  const bobSecondary = Math.sin(renderTime * 3.1 + presentation.noisePhase + pose.z * 0.015) * 0.004;
+  const bobSecondary = Math.sin(renderTime * 3.1 + presentation.noisePhase + pose.z * 0.015) * 0.0028;
   presentation.bobOffset = bobPrimary + bobSecondary;
 
   const rollNoise = Math.sin(renderTime * 1.42 + presentation.noisePhase) * IDLE_ROLL_NOISE_MAX;
@@ -124,7 +134,8 @@ export function applyShipPose(
   const targetSailTension = lerp(0.34, 1, presentation.speedBlend);
   presentation.sailTension = dampExp(presentation.sailTension, targetSailTension, SAIL_TENSION_DAMPING, frameDt);
 
-  const targetSailSway = clamp(-pose.turnRate * 0.07, -SAIL_SWAY_MAX, SAIL_SWAY_MAX);
+  const slipAngle = Math.atan2(pose.drift, Math.max(0.4, Math.abs(pose.speed)));
+  const targetSailSway = clamp(-(slipAngle * 0.95 + pose.turnRate * 0.01), -SAIL_SWAY_MAX, SAIL_SWAY_MAX);
   presentation.sailSway = dampExp(presentation.sailSway, targetSailSway, SAIL_SWAY_DAMPING, frameDt);
 
   const flutterAmplitude = lerp(SAIL_FLUTTER_BASE, SAIL_FLUTTER_MAX, presentation.speedBlend);
@@ -135,10 +146,18 @@ export function applyShipPose(
   visual.group.position.set(pose.x, (pose.y ?? ship.position.y) + sinkOffset, pose.z);
   visual.group.rotation.set(0, pose.heading, 0);
   visual.presentation.position.set(0, presentation.bobOffset, 0);
+  const physicsPitch = (pose.pitch ?? ship.pitch) * VISUAL_TILT_EXAGGERATION;
+  const physicsRoll = (pose.roll ?? ship.roll) * VISUAL_TILT_EXAGGERATION;
+  const finalPitch = clamp(physicsPitch + presentation.smoothedPitch + pitchNoise, -PITCH_VISUAL_CLAMP, PITCH_VISUAL_CLAMP);
+  const finalRoll = clamp(
+    physicsRoll + presentation.smoothedRoll + rollNoise + sinkProgress * 0.24,
+    -ROLL_VISUAL_CLAMP,
+    ROLL_VISUAL_CLAMP
+  );
   visual.presentation.rotation.set(
-    (pose.pitch ?? ship.pitch) + presentation.smoothedPitch + pitchNoise,
+    finalPitch,
     0,
-    (pose.roll ?? ship.roll) + presentation.smoothedRoll + rollNoise + sinkProgress * 0.24
+    finalRoll
   );
 
   for (const [index, sail] of visual.sails.entries()) {
@@ -166,7 +185,7 @@ export function applyShipPose(
   const contactTargetScale =
     1 +
     presentation.speedBlend * 0.05 +
-    (Math.abs(presentation.smoothedRoll) / Math.max(ROLL_MAX, 1e-5)) * 0.05 +
+    (Math.abs(presentation.smoothedRoll) / Math.max(ROLL_VISUAL_CLAMP, 1e-5)) * 0.05 +
     Math.abs(presentation.bobOffset) * 1.5;
   presentation.contactScale = dampExp(presentation.contactScale, contactTargetScale, CONTACT_DAMPING, frameDt);
 
@@ -185,8 +204,8 @@ export function applyShipPose(
     contactPatchBaseScaleZ * lerp(1, presentation.contactScale, 0.82)
   );
 
-  const shadowOpacityTarget = lerp(0.23, 0.31, presentation.speedBlend);
-  const patchOpacityTarget = lerp(0.12, 0.18, presentation.speedBlend);
+  const shadowOpacityTarget = lerp(0.28, 0.37, presentation.speedBlend);
+  const patchOpacityTarget = lerp(0.15, 0.21, presentation.speedBlend);
   presentation.contactShadowOpacity = dampExp(
     presentation.contactShadowOpacity,
     shadowOpacityTarget,

@@ -63,6 +63,8 @@ Requirements:
 - lateral drift is heavily controlled.
 - acceleration and speed changes are visually legible.
 - optional right-mouse orbit is render-only (yaw + clamped pitch) and preserves gameplay readability.
+- follow camera may use small heading lag and speed-based FOV ramp as render-only
+  readability amplification and must not affect simulation authority.
 
 ## Input Contract
 
@@ -98,6 +100,8 @@ The ship should feel primarily forward-moving through water, not sliding.
 ## Forward Motion
 
 - Forward throttle applies acceleration along ship forward axis.
+- Throttle input must be smoothed with a short acceleration ramp (`0 -> max`
+  over a brief interval) to avoid instant full-force response.
 - Reverse is intentionally weaker than forward.
 - Reverse input also provides braking help while moving forward.
 - Drag continuously reduces speed.
@@ -108,7 +112,7 @@ The ship should feel primarily forward-moving through water, not sliding.
 - Turning uses angular velocity, not instant heading snaps.
 - Steering moves angular velocity toward target turn rate.
 - Turn effectiveness is speed-banded:
-  - weak at low speed,
+  - very weak at low speed,
   - strongest at medium combat speed,
   - weaker again at high speed.
 - Low-speed turning remains usable for adjustment, but not dominant.
@@ -119,6 +123,8 @@ The ship should feel primarily forward-moving through water, not sliding.
 - If near-stationary and throttle is minimal, only a very weak fallback turn
   response is allowed.
 - Idle angular velocity is capped to prevent rotate-in-place gameplay.
+- Shipping profile should bias toward stronger near-zero suppression than prior
+  MVP values.
 
 ## Speed States
 
@@ -180,20 +186,21 @@ Movement must support combat first:
 ```txt
 MAX_SPEED = 40.5
 ACCELERATION = 60.75
-DRAG = 0.92
+DRAG = 0.89
 
 MAX_TURN_RATE = 2.2          // radians per second
 TURN_ACCEL = 6.0
-TURN_LOW_SPEED_MULT = 0.12
-TURN_MID_SPEED_START = 0.35
+TURN_LOW_SPEED_MULT = 0.07
+TURN_MID_SPEED_START = 0.45
 TURN_MID_SPEED_END = 0.65
 TURN_HIGH_SPEED_MULT = 0.55
-TURN_IDLE_SPEED_THRESHOLD = 0.06
-TURN_IDLE_INPUT_MULT = 0.40
-TURN_IDLE_ANGULAR_CAP = 0.22
+TURN_IDLE_SPEED_THRESHOLD = 0.10
+TURN_IDLE_INPUT_MULT = 0.22
+TURN_IDLE_ANGULAR_CAP = 0.12
 
-LATERAL_DAMPING = 0.18
+LATERAL_DAMPING = 0.30
 HEADING_ASSIST = 0.08
+THROTTLE_RESPONSE = 7.0      // smoothing follow speed
 
 BOOST_SPEED_MULT = 1.6
 BOOST_ACCEL_MULT = 1.25
@@ -209,17 +216,18 @@ Additional MVP constraints:
 ## Fixed-Tick Update Flow (Planar + Vertical)
 
 1. Read input (throttle, steer, boost).
-2. Apply planar acceleration (forward/weak reverse + brake assist).
-3. Apply drag and speed clamp.
-4. Compute speed-banded turn factor and target turn rate.
-5. If near-stationary and throttle is minimal, apply idle turn scale and idle
+2. Smooth throttle toward requested input.
+3. Apply planar acceleration (forward/weak reverse + brake assist).
+4. Apply drag and speed clamp.
+5. Compute speed-banded turn factor and target turn rate.
+6. If near-stationary and throttle is minimal, apply idle turn scale and idle
    angular cap.
-6. Apply lateral damping.
-7. Apply heading assist.
-8. Apply vertical physics from Spec 11 (gravity + buoyancy + damping).
-9. Apply boost modifiers (if active).
-10. Resolve collisions and cap angular collision impulse.
-11. Integrate transform and update derived speed/drift state.
+7. Apply lateral damping.
+8. Apply heading assist.
+9. Apply vertical physics from Spec 11 (gravity + buoyancy + damping).
+10. Apply boost modifiers (if active).
+11. Resolve collisions and cap angular collision impulse.
+12. Integrate transform and update derived speed/drift state.
 
 ## Reference Pseudocode
 
