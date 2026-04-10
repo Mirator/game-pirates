@@ -128,6 +128,7 @@ export function createRenderWorld(options: RenderWorldOptions = {}): RenderWorld
     playerWakeController,
     enemyWakeControllers: new Map(),
     wakeInfluencesScratch: [],
+    shipInfluencesScratch: [],
     enemyRoot,
     enemyMeshes: new Map(),
     enemyVisuals: new Map(),
@@ -148,6 +149,9 @@ export function createRenderWorld(options: RenderWorldOptions = {}): RenderWorld
     cameraSmoothedHeading: 0,
     cameraHeadingInitialized: false,
     cameraLookInitialized: false,
+    cameraAccelLag: 0,
+    cameraTurnSwing: 0,
+    cameraVerticalLag: 0,
     playerPoseScratch: {
       x: 0,
       y: 0,
@@ -158,7 +162,8 @@ export function createRenderWorld(options: RenderWorldOptions = {}): RenderWorld
       speed: 0,
       drift: 0,
       throttle: 0,
-      turnRate: 0
+      turnRate: 0,
+      acceleration: 0
     },
     enemyPoseScratch: {
       x: 0,
@@ -170,7 +175,8 @@ export function createRenderWorld(options: RenderWorldOptions = {}): RenderWorld
       speed: 0,
       drift: 0,
       throttle: 0,
-      turnRate: 0
+      turnRate: 0,
+      acceleration: 0
     },
     enemyPoseCache: new Map(),
     playerPresentationState: createPlayerPresentationRuntimeState(),

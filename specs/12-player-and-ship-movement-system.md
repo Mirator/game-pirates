@@ -52,6 +52,9 @@ Cross-spec dependencies:
   never feed back into gameplay handling authority.
 - GLB ship anchors (sail nodes, cannon-side anchors, stern wake anchor) are
   presentation integration inputs only and must never mutate movement authority.
+- Secondary rig-detail motion from `ship-rig-*` nodes is also presentation-only
+  and must remain bounded transform animation driven by movement outputs (no
+  movement/physics write-back).
 
 ## Camera and Readability Assumptions
 
@@ -173,6 +176,30 @@ High speed / boost:
 - Angular collision impulse is capped.
 - Ship should recover quickly into stable handling.
 
+## Alive Freeboard Guard (Spec 11 Coupling)
+
+Alive ships must use a bounded submerge guard to preserve readability and avoid
+"full-hull underwater" states during normal movement.
+
+Required rule:
+
+- `safeWaterRef = max(centerWaterHeight, lerp(probeWaterAvg, probeWaterMax, probePeakBlend))`
+- `allowedDepth = min(absoluteDepthCap, hullDraft * draftDepthRatio)`
+- `aliveMinHeight = safeWaterRef - allowedDepth`
+- `penetration = aliveMinHeight - shipY`
+- if `penetration <= 0`: no correction
+- if `0 < penetration <= softBand`: cap downward velocity only
+- if `softBand < penetration <= hardBand`: apply upward recovery velocity and
+  cap downward velocity
+- if `penetration > hardBand`: hard positional clamp to `aliveMinHeight` and cap
+  downward velocity
+
+Authority split:
+
+- This guard applies only while `status === "alive"`.
+- Sinking progression remains governed by Spec 11 sinking logic and may descend
+  below alive guard limits.
+
 ## Combat Handling Requirements
 
 Movement must support combat first:
@@ -201,6 +228,14 @@ TURN_IDLE_ANGULAR_CAP = 0.12
 LATERAL_DAMPING = 0.30
 HEADING_ASSIST = 0.08
 THROTTLE_RESPONSE = 7.0      // smoothing follow speed
+
+SAFE_SUBMERGE_DEPTH_ABSOLUTE_MAX = 0.24
+SAFE_SUBMERGE_DEPTH_DRAFT_RATIO = 0.24
+SAFE_SUBMERGE_PROBE_PEAK_BLEND = 0.25
+SAFE_DESCENT_VELOCITY_CAP = -0.22
+SAFE_SUBMERGE_SOFT_BAND = 0.035
+SAFE_SUBMERGE_HARD_BAND = 0.12
+SAFE_SOFT_RECOVERY_GAIN = 7.0
 
 BOOST_SPEED_MULT = 1.6
 BOOST_ACCEL_MULT = 1.25
@@ -271,6 +306,7 @@ Stability:
 
 - post-turn and post-collision recovery is quick and stable.
 - motion never feels buggy, floaty, or random.
+- idle alive-freeboard correction does not dominate natural wave response.
 
 Combat readiness:
 

@@ -225,6 +225,55 @@ broader rendering spec.
 - Preserve gameplay readability for navigation and aiming.
 - Keep the solution feasible in Three.js and scalable via quality tiers.
 
+### Water Perception Stack (MVP Required Order)
+
+The water render path must be implemented and tuned in this order for shipping
+MVP:
+
+1. Fresnel reflection blend (`mix(waterColor, skyColor, fresnel)` style
+   behavior).
+2. Camera-distance depth color gradient (near darker/saturated, far
+   lighter/desaturated).
+3. Dual-layer normals (macro wave normal + scrolling micro detail normal).
+4. Directional specular glint from sun direction, amplified by Fresnel.
+5. Crest/energy foam from slope or curvature signal.
+6. Ship interaction cues (under-hull darkening + trailing foam/disturbance
+   mask).
+7. Horizon/fog-to-sky blending so horizon reads brighter and more reflective
+   than near water.
+
+### Boat-Centric Motion Readability Stack (All Ships Required)
+
+The following readability stack is required for player and enemy ships (render
+only):
+
+1. Layered wake perception from three wake bands (core stern turbulence, main
+   trail, outer disturbance).
+2. Local hull interaction zones per ship (bow/hull/side disturbance masks with
+   smooth falloff).
+3. Near-field detail weighting (camera-relative and ship-relative) so nearby
+   water carries most motion readability.
+4. Disturbed-vs-calm lighting contrast (disturbed regions get stronger
+   specular/breakup than calm water).
+5. Subtle directional streaking aligned with primary wave/wind direction.
+6. Camera inertia coupling for readability (position lag, heading swing lag,
+   mild vertical lag) with strict control-safe bounds.
+
+Render authority rule:
+
+- All readability effects consume simulation-derived movement inputs
+  (`speed/accel/turn/throttle/heading/position`) and do not write gameplay
+  state.
+
+MVP non-goal:
+
+- No full screen-space reflections (SSR).
+
+Optional enhancement:
+
+- SSR-lite style approximation (sky-color/blurred reflection cue) may be added
+  later but is not required for MVP acceptance.
+
 ### Water Visual Pillars
 
 The ocean must present:
@@ -235,6 +284,7 @@ The ocean must present:
 - Visible horizon-line motion, not random undirected wobble.
 - Stronger light response at glancing camera angles.
 - Clear deep/shallow color variation.
+- Strong near-vs-far value and saturation separation.
 - Readable interaction around player ship.
 - Strong silhouette contrast near islands and horizon.
 
@@ -257,6 +307,9 @@ The ocean must present:
 - Include Fresnel term for grazing-angle highlight lift.
 - Include directional sun response and specular breakup.
 - Blend deep and shallow colors for shape and depth cues.
+- Include camera-distance depth gradient coloring (near/far response).
+- Fresnel must actively blend toward sky/horizon response, not only boost white
+  highlights.
 - Add near-hull water darkening driven by player/ship proximity.
 - Add foam response from local wave curvature (crest/curvature signal), not only
   wake masks.
@@ -282,10 +335,16 @@ The ocean must present:
 Required:
 
 - Visible wake trail behind player ship while moving.
+- Visible wake trail behind enemy ships while moving (quality-tier fallback
+  allowed).
 - Brighter/foam disturbance near hull while moving.
 - Stronger wake response during boost (`burst.active`).
 - Turn intensity must affect wake width/foam intensity and permit side-biased
   disturbance during hard turns.
+- Local hull interaction zone must weight bow > sides > stern and scale by
+  speed, acceleration, and turn intensity.
+- Interaction blending must avoid circular aura artifacts and must transition
+  smoothly into base water.
 
 Optional future:
 
@@ -314,6 +373,9 @@ Optional future:
 
 - Water mesh must have enough subdivision for displacement.
 - Water plane is camera-centered to avoid visible world-edge endings.
+- Camera-centered mesh rendering must remain world-phase locked: moving the
+  camera may reposition the mesh, but it must not change wave phase at fixed
+  world coordinates.
 - Quality tiers control subdivision density.
 
 ### Water Art Direction Requirements
@@ -325,11 +387,27 @@ Water style must be:
 - Clean and readable.
 - Non-photoreal.
 
+Palette requirement:
+
+- Use at least 3 intentional water tones:
+  - deep water: dark blue with slight green bias,
+  - mid water: saturated readable blue,
+  - highlights/reflection: pale blue-white.
+
 Avoid:
 
 - Muddy gray palette bias.
+- Single-tone pure-blue water across all distances/angles.
 - Physically accurate but visually dull outcomes.
 - Generic noisy stock-water appearance.
+
+### Readability Exaggeration Allowance (Render-Only)
+
+- Visual displacement may be slightly amplified for readability (`~1.1x` target
+  range).
+- Normal intensity may be slightly amplified for readability (`~1.2x` target
+  range).
+- These adjustments are render-only and must not alter simulation authority.
 
 ### Water Quality Tiers (Shipping Default = High)
 
@@ -360,11 +438,26 @@ Render-facing APIs and config contracts:
 
 - `WaterQualityLevel = "low" | "medium" | "high"` with default `"high"`.
 - `WaterRenderConfig` and `WaterTuningControls` in render config path.
+- `WaterTuningControls` must support at minimum:
+  - `reflectionBlendStrength`
+  - `depthGradientDistanceMax`
+  - `farColorDesaturation`
+  - `horizonLiftStrength`
+  - `microNormalScale`
+  - `microNormalWeight`
+  - `specularGlintExponent`
+  - `specularGlintStrength`
+  - `crestFoamStrength`
+  - `crestFoamThreshold`
+  - plus existing interaction tunables (`nearHull...`, wake/foam controls).
 - Per-tier `WATER_QUALITY_PRESETS` for wave/material behavior.
 - `AtmospherePresetId = "clearDay" | "goldenHour" | "overcast" | "dusk" | "storm"`.
 - `AtmosphereRenderConfig` and `AtmosphereTuningControls` in render config path.
 - Environment sync context includes interpolated player pose and camera
   position and player-influence data used by water shading (near-hull response).
+- Environment sync context must also support per-ship influence inputs for
+  water readability (`shipInfluences`: world pos, forward dir, speed/accel/turn/
+  throttle normalized values, hull extents).
 - Atmosphere profile system supports base preset + blendable storm influence.
 - `EnvironmentObjects` exposes `water` and `lighting` control surfaces.
 - `lighting` surface supports `getConfig()`, `setPreset(id)`, and
@@ -406,6 +499,63 @@ Expose and support runtime updates for:
 - `nearHullDarkeningRadius`
 - `curvatureFoamStrength`
 - `wavePeakHighlightStrength`
+- `reflectionBlendStrength`
+- `depthGradientDistanceMax`
+- `farColorDesaturation`
+- `horizonLiftStrength`
+- `microNormalScale`
+- `microNormalWeight`
+- `specularGlintExponent`
+- `specularGlintStrength`
+- `crestFoamStrength`
+- `crestFoamThreshold`
+- `localInteractionRadius`
+- `localInteractionLength`
+- `bowInteractionStrength`
+- `hullInteractionStrength`
+- `interactionNormalBoost`
+- `bowRippleFrequency`
+- `bowRippleStrength`
+- `nearFieldRadius`
+- `nearFieldNormalBoost`
+- `nearFieldDetailBoost`
+- `nearFieldContrastBoost`
+- `directionalStreakStrength`
+- `directionalStreakScale`
+- `directionalStreakAnisotropy`
+- `disturbedSpecularBoost`
+- `disturbedHighlightFlicker`
+- `disturbedContrastBoost`
+
+Recommended clamp bands (MVP safety):
+
+- `reflectionBlendStrength`: `0.0..2.0`
+- `depthGradientDistanceMax`: `20..400`
+- `farColorDesaturation`: `0.0..1.0`
+- `horizonLiftStrength`: `0.0..1.5`
+- `microNormalScale`: `0.25..12.0`
+- `microNormalWeight`: `0.0..1.5`
+- `specularGlintExponent`: `8..256`
+- `specularGlintStrength`: `0.0..3.0`
+- `crestFoamStrength`: `0.0..2.5`
+- `crestFoamThreshold`: `0.0..1.0`
+- `localInteractionRadius`: `3.0..24.0`
+- `localInteractionLength`: `4.0..30.0`
+- `bowInteractionStrength`: `0.0..2.0`
+- `hullInteractionStrength`: `0.0..2.0`
+- `interactionNormalBoost`: `0.0..2.0`
+- `bowRippleFrequency`: `1.0..24.0`
+- `bowRippleStrength`: `0.0..2.0`
+- `nearFieldRadius`: `8.0..120.0`
+- `nearFieldNormalBoost`: `0.0..2.0`
+- `nearFieldDetailBoost`: `0.0..2.0`
+- `nearFieldContrastBoost`: `0.0..1.5`
+- `directionalStreakStrength`: `0.0..1.5`
+- `directionalStreakScale`: `0.001..0.2`
+- `directionalStreakAnisotropy`: `0.0..1.0`
+- `disturbedSpecularBoost`: `0.0..2.5`
+- `disturbedHighlightFlicker`: `0.0..1.5`
+- `disturbedContrastBoost`: `0.0..1.5`
 
 ## Performance Constraints and Defaults
 
@@ -433,13 +583,23 @@ Optimization levers:
 - Horizon reads as intentional, not a hard boundary.
 - Distant objects fade naturally into atmospheric fog.
 - Ocean no longer appears flat when camera is static.
+- Near and far water bands are visibly different in hue/value.
+- Horizon reflectivity reads stronger than near-water reflectivity at glancing
+  angles.
 - Motion remains visible at low ship speed.
 - Angle-dependent water highlights are visible.
 - Shoreline areas are clearly differentiated from deep water.
 - Ship movement produces visible wake and disturbance.
+- Ship presence produces visible local water reaction at low and medium speed.
 - Near-hull water darkening and curvature foam are visible without overpowering
   readability.
 - Turning creates asymmetric side disturbance in wake/foam at higher turn rates.
+- Bow/hull disturbance is clearly visible on both player and enemy ships.
+- Near-field water around camera/ships is visibly more energetic than far field.
+- Directional streaking is visible at glancing angles without reading as
+  painted speed lines.
+- Disturbed water (hull/wake zones) shows stronger specular contrast than calm
+  water.
 - Overall scene has a recognizable adventurous maritime mood.
 
 ### Technical
@@ -450,7 +610,37 @@ Optimization levers:
 - Water remains stable across camera movement.
 - No major shader artifacts at horizon.
 - No obvious normal-map tiling during typical play.
+- Camera translation must not shift displacement phase at fixed world points.
 - Performance remains acceptable on target hardware.
+- No mandatory screen-space ray-marching reflection pass is required for MVP.
+
+## Spec Verification Requirements
+
+Required validation coverage for this spec:
+
+- Fresnel reflection blend and depth-gradient uniforms exist, clamp correctly,
+  and affect final color.
+- Near-vs-far water color difference is measurable in fixed-camera snapshots.
+- Micro normal layer contributes non-zero high-frequency shading detail.
+- Specular glint responds to sun-direction changes.
+- Crest foam activates on steep/curved regions and remains subdued on flat
+  regions.
+- Ship-proximity darkening and trailing interaction mask appear only within
+  expected spatial envelope.
+- World-point wave phase remains stable under camera translation (mesh origin
+  uniform updates but sampled world displacement remains invariant).
+- All-ship interaction uniform plumbing is present, clamped, and stable under
+  multi-ship load.
+- Disturbed-region specular/contrast boosts stay bounded and do not whiteout.
+- Directional streaking remains angle-dependent and low-artifact in fixed
+  visual snapshots.
+- Deterministic visual scenarios captured for:
+  - idle water baseline,
+  - moving ship straight,
+  - moving ship hard turn,
+  - accel/decel pulse,
+  - multi-ship crossing wake,
+  - horizon-facing camera.
 
 ## Notes for Engineering
 

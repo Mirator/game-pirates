@@ -30,4 +30,5 @@ to one or more spec files.
   boost, speed states, drift control, and heading assist behavior.
 - Treat Spec 09 as the canonical ship presentation-feedback authority for
   render-only tilt, sail animation, water-contact grounding cues, and the
-  GLB-first ship asset contract with procedural fallback.
+  GLB-first ship asset contract (including v3 complexity + rig-detail node
+  contracts) with procedural fallback.

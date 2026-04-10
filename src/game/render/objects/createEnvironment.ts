@@ -69,6 +69,19 @@ export interface EnvironmentWakeInfluence {
   falloff: number;
 }
 
+export interface EnvironmentShipInfluence {
+  x: number;
+  z: number;
+  forwardX: number;
+  forwardZ: number;
+  speedNorm: number;
+  accelNorm: number;
+  turnNorm: number;
+  throttleNorm: number;
+  hullLength: number;
+  hullWidth: number;
+}
+
 export interface EnvironmentSyncContext {
   frameDt: number;
   renderTime: number;
@@ -79,6 +92,7 @@ export interface EnvironmentSyncContext {
   };
   playerPose: EnvironmentPlayerPose;
   wakeInfluences?: readonly EnvironmentWakeInfluence[];
+  shipInfluences?: readonly EnvironmentShipInfluence[];
 }
 
 export interface EnvironmentObjects {
@@ -256,7 +270,8 @@ function createWaterGeometry(segments: number): PlaneGeometry {
   return geometry;
 }
 
-const WATER_MAX_WAKE_SOURCES = 12;
+const WATER_MAX_WAKE_SOURCES = 24;
+const WATER_MAX_SHIP_INFLUENCES = 8;
 
 const WATER_VERTEX_SHADER = `
 #define MAX_WAVES ${WATER_MAX_WAVE_COMPONENTS}
@@ -269,6 +284,7 @@ uniform float uWaveLengths[MAX_WAVES];
 uniform float uWaveSpeeds[MAX_WAVES];
 uniform float uWaveSteepness[MAX_WAVES];
 uniform float uWavePhases[MAX_WAVES];
+uniform vec2 uWaterOriginXZ;
 
 varying vec3 vWorldPos;
 varying vec3 vGeomNormal;
@@ -278,6 +294,7 @@ varying vec2 vWorldUv;
 
 vec3 displaceSurface(vec3 inPosition) {
   vec3 displaced = inPosition;
+  vec2 sampleXZ = inPosition.xz + uWaterOriginXZ;
   for (int i = 0; i < MAX_WAVES; i += 1) {
     if (i >= uWaveCount) {
       continue;
@@ -285,7 +302,7 @@ vec3 displaceSurface(vec3 inPosition) {
     vec2 direction = normalize(uWaveDirections[i]);
     float wavelength = max(0.001, uWaveLengths[i]);
     float waveNumber = 6.28318530718 / wavelength;
-    float phase = waveNumber * dot(direction, inPosition.xz) + uTime * uWaveSpeeds[i] + uWavePhases[i];
+    float phase = waveNumber * dot(direction, sampleXZ) + uTime * uWaveSpeeds[i] + uWavePhases[i];
     float amplitude = uWaveAmplitudes[i];
     float steepness = uWaveSteepness[i];
     float cosine = cos(phase);
@@ -324,14 +341,18 @@ void main() {
 `;
 
 const WATER_FRAGMENT_SHADER = `
+#define MAX_WAVES ${WATER_MAX_WAVE_COMPONENTS}
 #define MAX_ISLANDS ${WATER_MAX_ISLANDS}
 #define MAX_WAKE_SOURCES ${WATER_MAX_WAKE_SOURCES}
+#define MAX_SHIP_INFLUENCES ${WATER_MAX_SHIP_INFLUENCES}
 
 uniform float uTime;
+uniform vec2 uWaveDirections[MAX_WAVES];
 uniform vec3 uCameraPos;
 uniform vec3 uSunDirection;
 uniform vec3 uDeepColor;
 uniform vec3 uShallowColor;
+uniform vec3 uSkyColor;
 uniform vec3 uStormColor;
 uniform vec3 uFoamColor;
 uniform float uStormBlend;
@@ -348,6 +369,16 @@ uniform float uFresnelStrength;
 uniform float uFresnelPower;
 uniform float uSpecularStrength;
 uniform float uSpecularExponent;
+uniform float uReflectionBlendStrength;
+uniform float uDepthGradientDistanceMax;
+uniform float uFarColorDesaturation;
+uniform float uHorizonLiftStrength;
+uniform float uMicroNormalScale;
+uniform float uMicroNormalWeight;
+uniform float uSpecularGlintExponent;
+uniform float uSpecularGlintStrength;
+uniform float uCrestFoamStrength;
+uniform float uCrestFoamThreshold;
 
 uniform int uWakeSourceCount;
 uniform vec4 uWakeSources[MAX_WAKE_SOURCES];
@@ -361,6 +392,27 @@ uniform float uNearHullDarkeningStrength;
 uniform float uNearHullDarkeningRadius;
 uniform float uCurvatureFoamStrength;
 uniform float uWavePeakHighlightStrength;
+uniform int uShipInfluenceCount;
+uniform vec4 uShipInfluencePosDir[MAX_SHIP_INFLUENCES];
+uniform vec4 uShipInfluenceMotion[MAX_SHIP_INFLUENCES];
+uniform vec4 uShipInfluenceHull[MAX_SHIP_INFLUENCES];
+uniform float uLocalInteractionRadius;
+uniform float uLocalInteractionLength;
+uniform float uBowInteractionStrength;
+uniform float uHullInteractionStrength;
+uniform float uInteractionNormalBoost;
+uniform float uBowRippleFrequency;
+uniform float uBowRippleStrength;
+uniform float uNearFieldRadius;
+uniform float uNearFieldNormalBoost;
+uniform float uNearFieldDetailBoost;
+uniform float uNearFieldContrastBoost;
+uniform float uDirectionalStreakStrength;
+uniform float uDirectionalStreakScale;
+uniform float uDirectionalStreakAnisotropy;
+uniform float uDisturbedSpecularBoost;
+uniform float uDisturbedHighlightFlicker;
+uniform float uDisturbedContrastBoost;
 
 uniform int uShorelineEnabled;
 uniform int uIslandCount;
@@ -375,6 +427,22 @@ varying vec2 vWorldUv;
 
 vec3 decodeNormal(vec3 encoded) {
   return normalize(encoded * 2.0 - 1.0);
+}
+
+float waterLuma(vec3 color) {
+  return dot(color, vec3(0.2126, 0.7152, 0.0722));
+}
+
+vec3 desaturate(vec3 color, float amount) {
+  return mix(color, vec3(waterLuma(color)), clamp(amount, 0.0, 1.0));
+}
+
+vec2 safeNormalize2(vec2 value) {
+  float len = length(value);
+  if (len <= 1e-5) {
+    return vec2(0.0, 1.0);
+  }
+  return value / len;
 }
 
 float computeShorelineMask() {
@@ -433,36 +501,169 @@ float computeWakeFactor(out vec2 wakeFlow, out float wakeFoamTint) {
     float lateral = dot(toFragment, right);
     float absLateral = abs(lateral);
 
-    float widthMask = 1.0 - smoothstep(width * 0.45, width * 1.35, absLateral);
-    float lengthMask = 1.0 - smoothstep(trailLength * 0.04, trailLength * 0.78, along);
+    float widthMask = 1.0 - smoothstep(width * 0.38, width * 1.22, absLateral);
+    float lengthMask = 1.0 - smoothstep(trailLength * 0.03, trailLength * 0.92, along);
     float sternMask = 1.0 - smoothstep(width * 0.12, width * 0.72, length(toFragment));
-    float swirl = 0.92 + sin((along * 0.55 + uTime * 2.4) + lateral * 0.75) * 0.08;
+    float swirl = 0.9 + sin((along * 0.55 + uTime * 2.4) + lateral * 0.75) * 0.1;
+    float turbulence = 0.86 + (sin(along * 0.9 + uTime * 3.2 + lateral * 2.2) * 0.5 + 0.5) * 0.24;
     float signedLateral = clamp(lateral / (width * 1.2), -1.0, 1.0);
     float asymmetry = 1.0 + signedLateral * clamp(turn, -1.0, 1.0) * 0.35;
 
-    float ribbonContribution = widthMask * lengthMask * falloff * 0.24 * asymmetry;
-    float sternContribution = sternMask * 0.48;
-    float contribution = max(ribbonContribution, sternContribution) * intensity * swirl;
+    float vTarget = along * (0.15 + abs(turn) * 0.13);
+    float vMask = 1.0 - smoothstep(width * 0.24, width * 0.9, abs(absLateral - vTarget));
+    float coreBandMask = smoothstep(1.02, 1.16, falloff);
+    float outerBandMask = 1.0 - smoothstep(0.74, 0.92, falloff);
+    float trailBandMask = clamp(1.0 - coreBandMask - outerBandMask, 0.0, 1.0);
+    float wakeShape = mix(widthMask, vMask, 0.62);
+    float ribbonContribution =
+      wakeShape * lengthMask * falloff * (0.2 + trailBandMask * 0.22 + outerBandMask * 0.1) * asymmetry;
+    float sternContribution = sternMask * (0.84 * coreBandMask + 0.18 * trailBandMask);
+    float contribution = max(ribbonContribution, sternContribution) * intensity * swirl * turbulence;
     wakeFactor += contribution;
-    wakeFoamTint += contribution * foamTint * 0.55;
+    float foamBandWeight = coreBandMask * 1.0 + trailBandMask * 0.52 + outerBandMask * 0.18;
+    wakeFoamTint += contribution * foamTint * foamBandWeight;
 
-    wakeFlow += right * signedLateral * contribution * (0.6 + abs(turn) * 0.4) * normalBoost * 0.65;
+    float flowBandWeight = 0.55 * coreBandMask + 0.92 * trailBandMask + 1.18 * outerBandMask;
+    wakeFlow += right * signedLateral * contribution * (0.62 + abs(turn) * 0.55) * normalBoost * flowBandWeight;
   }
 
-  wakeFactor = clamp(wakeFactor, 0.0, 0.65);
-  wakeFoamTint = clamp(wakeFoamTint, 0.0, 0.55);
+  wakeFactor = clamp(wakeFactor, 0.0, 0.82);
+  wakeFoamTint = clamp(wakeFoamTint, 0.0, 0.68);
   return wakeFactor;
 }
 
+float computeNearestShipDistance() {
+  float nearest = 1e5;
+  for (int i = 0; i < MAX_SHIP_INFLUENCES; i += 1) {
+    if (i >= uShipInfluenceCount) {
+      continue;
+    }
+    vec2 shipPos = uShipInfluencePosDir[i].xy;
+    nearest = min(nearest, distance(vWorldPos.xz, shipPos));
+  }
+  if (nearest > 9e4) {
+    nearest = distance(vWorldPos.xz, uPlayerPos);
+  }
+  return nearest;
+}
+
+float computeShipInteraction(
+  out vec2 interactionFlow,
+  out float interactionFoam,
+  out float interactionBrightness,
+  out float interactionDisturbance
+) {
+  interactionFlow = vec2(0.0);
+  interactionFoam = 0.0;
+  interactionBrightness = 0.0;
+  interactionDisturbance = 0.0;
+  float interactionMask = 0.0;
+
+  for (int i = 0; i < MAX_SHIP_INFLUENCES; i += 1) {
+    if (i >= uShipInfluenceCount) {
+      continue;
+    }
+
+    vec4 posDir = uShipInfluencePosDir[i];
+    vec4 motion = uShipInfluenceMotion[i];
+    vec4 hull = uShipInfluenceHull[i];
+    vec2 shipPos = posDir.xy;
+    vec2 forward = safeNormalize2(posDir.zw);
+    vec2 right = vec2(-forward.y, forward.x);
+    vec2 toFragment = vWorldPos.xz - shipPos;
+    float along = dot(toFragment, forward);
+    float lateral = dot(toFragment, right);
+    float absLateral = abs(lateral);
+
+    float hullLength = max(1.0, hull.x);
+    float hullWidth = max(0.5, hull.y);
+    float localRadius = max(hullWidth * 2.2, uLocalInteractionRadius);
+    float localLength = max(hullLength * 1.3, uLocalInteractionLength);
+
+    float foreMask = smoothstep(-hullLength * 0.7, hullLength * 0.55, along);
+    float aftMask = 1.0 - smoothstep(hullLength * 0.55, localLength, along);
+    float hullLongMask = foreMask * aftMask;
+    float hullLateralMask = 1.0 - smoothstep(hullWidth * 0.35, localRadius, absLateral);
+    float hullMask = hullLongMask * hullLateralMask;
+
+    vec2 bowCenter = shipPos + forward * (hullLength * 0.56);
+    float bowDistance = distance(vWorldPos.xz, bowCenter);
+    float bowRadius = max(hullWidth * 1.4, localRadius * 0.42);
+    float bowMask = 1.0 - smoothstep(0.0, bowRadius, bowDistance);
+
+    float sideBand = smoothstep(hullWidth * 0.42, hullWidth * 1.35, absLateral);
+    sideBand *= 1.0 - smoothstep(hullWidth * 1.35, localRadius, absLateral);
+    float sideLongMask = 1.0 - smoothstep(hullLength * 0.1, localLength, abs(along));
+    float sideMask = sideBand * sideLongMask;
+
+    float speedNorm = clamp(motion.x, 0.0, 1.8);
+    float accelNorm = clamp(motion.y, 0.0, 1.8);
+    float turnNorm = clamp(motion.z, 0.0, 1.8);
+    float throttleNorm = clamp(motion.w, 0.0, 1.0);
+    float motionEnergy = clamp(
+      speedNorm * 0.78 + accelNorm * 0.62 + turnNorm * 0.52 + throttleNorm * 0.44,
+      0.0,
+      1.8
+    );
+
+    float bowStrength = bowMask * uBowInteractionStrength * (0.35 + motionEnergy * 1.08);
+    float hullStrength = hullMask * uHullInteractionStrength * (0.32 + motionEnergy * 0.95);
+    float sideStrength = sideMask * uHullInteractionStrength * (0.24 + turnNorm * 1.05 + speedNorm * 0.42);
+
+    float ripplePhase = along * uBowRippleFrequency - uTime * (2.4 + speedNorm * 2.8);
+    float bowRipples = (sin(ripplePhase) * 0.5 + 0.5) * bowMask;
+    bowRipples *= uBowRippleStrength * (0.24 + motionEnergy * 1.04);
+
+    float signedLateral = clamp(lateral / max(0.001, localRadius), -1.0, 1.0);
+    float asymmetry = 1.0 + signedLateral * clamp(motion.z, -1.0, 1.0) * 0.35;
+    float contribution = clamp((bowStrength + hullStrength + sideStrength) * asymmetry, 0.0, 1.6);
+
+    interactionMask += contribution;
+    interactionBrightness += contribution * 0.78 + bowRipples * 0.68;
+    interactionFoam += contribution * (0.28 + accelNorm * 0.3) + bowRipples * 1.02;
+    interactionDisturbance += contribution * (0.62 + turnNorm * 0.4) + bowRipples * 0.56;
+    interactionFlow += right * signedLateral * contribution * (0.62 + turnNorm * 0.65);
+    interactionFlow += forward * (bowRipples * 0.14);
+  }
+
+  interactionMask = clamp(interactionMask, 0.0, 1.45);
+  interactionFoam = clamp(interactionFoam, 0.0, 1.7);
+  interactionBrightness = clamp(interactionBrightness, 0.0, 1.8);
+  interactionDisturbance = clamp(interactionDisturbance, 0.0, 1.8);
+  return interactionMask;
+}
+
+float computeDirectionalStreak(vec3 viewDirection, vec3 detailNormal) {
+  vec2 primaryDirection = safeNormalize2(uWaveDirections[0]);
+  vec2 secondaryDirection = vec2(-primaryDirection.y, primaryDirection.x);
+  vec2 streakDirection = safeNormalize2(mix(secondaryDirection, primaryDirection, clamp(uDirectionalStreakAnisotropy, 0.0, 1.0)));
+  float phaseWarp = sin(dot(vWorldPos.xz, vec2(0.08, -0.06)) + uTime * 0.23) * 6.0;
+  float phase = (dot(vWorldPos.xz, streakDirection) + phaseWarp) * uDirectionalStreakScale + uTime * 0.58;
+  float broad = sin(phase) * 0.5 + 0.5;
+  float detail = sin(phase * 2.15 + detailNormal.x * 7.3 + detailNormal.z * 6.2) * 0.5 + 0.5;
+  float streakMask = smoothstep(0.58, 0.96, broad * 0.6 + detail * 0.4);
+  float glancing = smoothstep(0.08, 0.82, 1.0 - abs(viewDirection.y));
+  return streakMask * glancing * uDirectionalStreakStrength;
+}
+
 void main() {
+  float cameraDistance = distance(vWorldPos.xz, uCameraPos.xz);
+  float nearestShipDistance = computeNearestShipDistance();
+  float nearFieldCameraMask = 1.0 - smoothstep(0.0, max(0.001, uNearFieldRadius), cameraDistance);
+  float nearFieldShipMask = 1.0 - smoothstep(0.0, max(0.001, uNearFieldRadius * 0.95), nearestShipDistance);
+  float nearFieldMask = clamp(max(nearFieldCameraMask, nearFieldShipMask), 0.0, 1.0);
+
   vec2 uvA = vWorldUv * uNormalTilingA + uTime * uNormalScrollA;
-  vec2 uvB = vWorldUv * uNormalTilingB + uTime * uNormalScrollB;
+  float detailScale = 1.0 + nearFieldMask * uNearFieldDetailBoost;
+  vec2 uvB = vWorldUv * (uNormalTilingB * max(0.001, uMicroNormalScale) * detailScale) + uTime * uNormalScrollB;
 
   vec3 normalA = decodeNormal(texture2D(uNormalMapA, uvA).xyz);
   vec3 normalB = decodeNormal(texture2D(uNormalMapB, uvB).xyz);
-  vec3 detailNormal = normalize(vec3(normalA.x + normalB.x, 1.0, normalA.z + normalB.z));
+  float microWeight = max(0.0, uMicroNormalWeight);
+  vec3 detailNormal = normalize(vec3(normalA.x + normalB.x * microWeight, 1.0, normalA.z + normalB.z * microWeight));
+  float nearFieldNormalStrength = 1.0 + nearFieldMask * uNearFieldNormalBoost;
 
-  vec3 surfaceNormal = normalize(vGeomNormal + vec3(detailNormal.x, detailNormal.y * 0.12, detailNormal.z) * uNormalStrength);
+  vec3 surfaceNormal = normalize(vGeomNormal + vec3(detailNormal.x, detailNormal.y * 0.12, detailNormal.z) * uNormalStrength * nearFieldNormalStrength);
   vec3 viewDirection = normalize(uCameraPos - vWorldPos);
   vec3 sunDirection = normalize(uSunDirection);
 
@@ -471,33 +672,80 @@ void main() {
   vec2 wakeFlow;
   float wakeFoamTint;
   float wakeFactor = computeWakeFactor(wakeFlow, wakeFoamTint);
-  surfaceNormal = normalize(surfaceNormal + vec3(wakeFlow.x, wakeFactor * uWakeDistortionStrength, wakeFlow.y));
-  float foamFactor = smoothstep(uFoamThreshold + 0.2, 0.95, wakeFactor);
 
-  float playerDistance = distance(vWorldPos.xz, uPlayerPos);
-  float nearHullMask = 1.0 - smoothstep(0.0, max(0.001, uNearHullDarkeningRadius), playerDistance);
+  vec2 interactionFlow;
+  float interactionFoam;
+  float interactionBrightness;
+  float interactionDisturbance;
+  float interactionMask = computeShipInteraction(
+    interactionFlow,
+    interactionFoam,
+    interactionBrightness,
+    interactionDisturbance
+  );
+
+  float combinedDisturbance = clamp(wakeFactor + interactionDisturbance * 0.58, 0.0, 1.45);
+  surfaceNormal = normalize(
+    surfaceNormal +
+      vec3(
+        wakeFlow.x + interactionFlow.x,
+        combinedDisturbance * (uWakeDistortionStrength + interactionMask * uInteractionNormalBoost),
+        wakeFlow.y + interactionFlow.y
+      )
+  );
+  float foamFactor = smoothstep(uFoamThreshold + 0.15, 0.9, wakeFactor + interactionFoam * 0.34);
+
+  float nearHullMask = 1.0 - smoothstep(0.0, max(0.001, uNearHullDarkeningRadius), nearestShipDistance);
   float curvatureSignal = max(0.0, 1.0 - surfaceNormal.y);
   float curvatureFoam = smoothstep(0.12, 0.46, curvatureSignal) * uCurvatureFoamStrength;
-  float wavePeakHighlight = smoothstep(0.22, 0.58, vWorldPos.y) * uWavePeakHighlightStrength * (0.45 + nearHullMask * 0.55);
+  float crestThreshold = clamp(uCrestFoamThreshold, 0.0, 1.0);
+  float crestFoam = smoothstep(crestThreshold, min(1.0, crestThreshold + 0.24), curvatureSignal) * uCrestFoamStrength;
+  float wavePeakHighlight =
+    smoothstep(0.2, 0.56, vWorldPos.y) * uWavePeakHighlightStrength * (0.44 + nearHullMask * 0.62 + interactionMask * 0.58);
 
-  vec3 baseColor = mix(uDeepColor, uShallowColor, clamp(shorelineMask + wakeFactor * 0.045, 0.0, 1.0));
+  float depthFactor = clamp(cameraDistance / max(1.0, uDepthGradientDistanceMax), 0.0, 1.0);
+  vec3 depthColor = mix(uDeepColor, uShallowColor, depthFactor);
+  depthColor = desaturate(depthColor, depthFactor * uFarColorDesaturation);
+  vec3 baseColor = mix(depthColor, uShallowColor, clamp(shorelineMask + wakeFactor * 0.09 + interactionBrightness * 0.16, 0.0, 1.0));
   baseColor *= 1.0 - nearHullMask * uNearHullDarkeningStrength;
   baseColor = mix(baseColor, uStormColor, clamp(uStormBlend, 0.0, 1.0) * 0.72);
 
   float ndv = max(0.0, dot(surfaceNormal, viewDirection));
   float fresnel = pow(1.0 - ndv, max(0.1, uFresnelPower)) * uFresnelStrength;
+  float reflectionBlend = clamp(fresnel * uReflectionBlendStrength, 0.0, 1.0);
   vec3 halfVector = normalize(viewDirection + sunDirection);
-  float specular = pow(max(dot(surfaceNormal, halfVector), 0.0), uSpecularExponent) * uSpecularStrength;
+  float glintExponent = mix(uSpecularExponent, uSpecularGlintExponent, 0.7);
+  float disturbedMask = clamp(wakeFactor * 1.1 + interactionMask * 0.95, 0.0, 1.0);
+  float disturbedSpecular = 1.0 + disturbedMask * uDisturbedSpecularBoost;
+  float highlightFlicker = 1.0 + (sin((vWorldPos.x + vWorldPos.z) * 0.25 + uTime * 8.5) * 0.5 + 0.5) * disturbedMask * uDisturbedHighlightFlicker;
+  float specular =
+    pow(max(dot(surfaceNormal, halfVector), 0.0), glintExponent) * uSpecularStrength * uSpecularGlintStrength * disturbedSpecular * highlightFlicker;
+  specular *= 0.35 + reflectionBlend * 0.65;
+  float directionalStreak = computeDirectionalStreak(viewDirection, detailNormal);
 
-  vec3 finalColor = baseColor;
-  finalColor += fresnel * vec3(0.3, 0.46, 0.62);
+  vec3 finalColor = mix(baseColor, uSkyColor, reflectionBlend);
   finalColor += specular * vec3(1.0, 0.95, 0.84);
+  finalColor += directionalStreak * vec3(0.05, 0.08, 0.1);
   finalColor += vec3(0.08, 0.12, 0.14) * wavePeakHighlight;
   finalColor = mix(
     finalColor,
     uFoamColor,
-    clamp(foamFactor * (0.16 + wakeFoamTint * uWakeFoamTintStrength) + curvatureFoam * 0.24, 0.0, 0.36)
+    clamp(
+      foamFactor * (0.2 + wakeFoamTint * uWakeFoamTintStrength) +
+        interactionFoam * 0.2 +
+        curvatureFoam * 0.2 +
+        crestFoam * 0.25,
+      0.0,
+      0.48
+    )
   );
+
+  float luma = waterLuma(finalColor);
+  float contrastBoost = 1.0 + nearFieldMask * uNearFieldContrastBoost + disturbedMask * uDisturbedContrastBoost;
+  finalColor = (finalColor - vec3(luma)) * contrastBoost + vec3(luma);
+
+  float horizonMask = smoothstep(0.2, 1.0, 1.0 - abs(viewDirection.y)) * depthFactor;
+  finalColor = mix(finalColor, uSkyColor, clamp(horizonMask * uHorizonLiftStrength, 0.0, 0.55));
 
   gl_FragColor = vec4(finalColor, 1.0);
   #include <tonemapping_fragment>
@@ -668,6 +916,9 @@ export function createEnvironment(
   const wakeSourceData = Array.from({ length: WATER_MAX_WAKE_SOURCES }, () => new Vector4(0, 0, 0, 0));
   const wakeDirectionData = Array.from({ length: WATER_MAX_WAKE_SOURCES }, () => new Vector4(0, 1, 0, 0));
   const wakeTuningData = Array.from({ length: WATER_MAX_WAKE_SOURCES }, () => new Vector4(0, 0, 1, 0));
+  const shipInfluencePosDirData = Array.from({ length: WATER_MAX_SHIP_INFLUENCES }, () => new Vector4(0, 0, 0, 1));
+  const shipInfluenceMotionData = Array.from({ length: WATER_MAX_SHIP_INFLUENCES }, () => new Vector4(0, 0, 0, 0));
+  const shipInfluenceHullData = Array.from({ length: WATER_MAX_SHIP_INFLUENCES }, () => new Vector4(5.2, 2.4, 0, 0));
   const normalMapA = createWaterNormalTexture(128, 11.3);
   const normalMapB = createWaterNormalTexture(128, 29.7);
 
@@ -680,10 +931,12 @@ export function createEnvironment(
     uWaveSpeeds: { value: [0, 0, 0, 0] },
     uWaveSteepness: { value: [0, 0, 0, 0] },
     uWavePhases: { value: [0, 0, 0, 0] },
+    uWaterOriginXZ: { value: new Vector2(0, 0) },
     uCameraPos: { value: new Vector3(0, 6, -12) },
     uSunDirection: { value: new Vector3(22, 40, 10).normalize() },
     uDeepColor: { value: new Color(waterConfig.tuning.deepColor) },
     uShallowColor: { value: new Color(waterConfig.tuning.shallowColor) },
+    uSkyColor: { value: new Color("#a6d8f5") },
     uStormColor: { value: stormWaterColor.clone() },
     uFoamColor: { value: new Color("#d2f4ff") },
     uStormBlend: { value: 0 },
@@ -698,6 +951,16 @@ export function createEnvironment(
     uFresnelPower: { value: 4.4 },
     uSpecularStrength: { value: 0.6 },
     uSpecularExponent: { value: 40 },
+    uReflectionBlendStrength: { value: waterConfig.tuning.reflectionBlendStrength },
+    uDepthGradientDistanceMax: { value: waterConfig.tuning.depthGradientDistanceMax },
+    uFarColorDesaturation: { value: waterConfig.tuning.farColorDesaturation },
+    uHorizonLiftStrength: { value: waterConfig.tuning.horizonLiftStrength },
+    uMicroNormalScale: { value: waterConfig.tuning.microNormalScale },
+    uMicroNormalWeight: { value: waterConfig.tuning.microNormalWeight },
+    uSpecularGlintExponent: { value: waterConfig.tuning.specularGlintExponent },
+    uSpecularGlintStrength: { value: waterConfig.tuning.specularGlintStrength },
+    uCrestFoamStrength: { value: waterConfig.tuning.crestFoamStrength },
+    uCrestFoamThreshold: { value: waterConfig.tuning.crestFoamThreshold },
     uWakeSourceCount: { value: 0 },
     uWakeSources: { value: wakeSourceData },
     uWakeDirections: { value: wakeDirectionData },
@@ -710,6 +973,27 @@ export function createEnvironment(
     uNearHullDarkeningRadius: { value: waterConfig.tuning.nearHullDarkeningRadius },
     uCurvatureFoamStrength: { value: waterConfig.tuning.curvatureFoamStrength },
     uWavePeakHighlightStrength: { value: waterConfig.tuning.wavePeakHighlightStrength },
+    uShipInfluenceCount: { value: 0 },
+    uShipInfluencePosDir: { value: shipInfluencePosDirData },
+    uShipInfluenceMotion: { value: shipInfluenceMotionData },
+    uShipInfluenceHull: { value: shipInfluenceHullData },
+    uLocalInteractionRadius: { value: waterConfig.tuning.localInteractionRadius },
+    uLocalInteractionLength: { value: waterConfig.tuning.localInteractionLength },
+    uBowInteractionStrength: { value: waterConfig.tuning.bowInteractionStrength },
+    uHullInteractionStrength: { value: waterConfig.tuning.hullInteractionStrength },
+    uInteractionNormalBoost: { value: waterConfig.tuning.interactionNormalBoost },
+    uBowRippleFrequency: { value: waterConfig.tuning.bowRippleFrequency },
+    uBowRippleStrength: { value: waterConfig.tuning.bowRippleStrength },
+    uNearFieldRadius: { value: waterConfig.tuning.nearFieldRadius },
+    uNearFieldNormalBoost: { value: waterConfig.tuning.nearFieldNormalBoost },
+    uNearFieldDetailBoost: { value: waterConfig.tuning.nearFieldDetailBoost },
+    uNearFieldContrastBoost: { value: waterConfig.tuning.nearFieldContrastBoost },
+    uDirectionalStreakStrength: { value: waterConfig.tuning.directionalStreakStrength },
+    uDirectionalStreakScale: { value: waterConfig.tuning.directionalStreakScale },
+    uDirectionalStreakAnisotropy: { value: waterConfig.tuning.directionalStreakAnisotropy },
+    uDisturbedSpecularBoost: { value: waterConfig.tuning.disturbedSpecularBoost },
+    uDisturbedHighlightFlicker: { value: waterConfig.tuning.disturbedHighlightFlicker },
+    uDisturbedContrastBoost: { value: waterConfig.tuning.disturbedContrastBoost },
     uShorelineEnabled: { value: 1 },
     uIslandCount: { value: 0 },
     uIslandData: { value: islandData },
@@ -777,6 +1061,16 @@ export function createEnvironment(
     waterUniforms.uFresnelPower.value = waterPreset.fresnelPower;
     waterUniforms.uSpecularStrength.value = waterPreset.specularStrength;
     waterUniforms.uSpecularExponent.value = waterPreset.specularExponent;
+    waterUniforms.uReflectionBlendStrength.value = waterConfig.tuning.reflectionBlendStrength;
+    waterUniforms.uDepthGradientDistanceMax.value = waterConfig.tuning.depthGradientDistanceMax;
+    waterUniforms.uFarColorDesaturation.value = waterConfig.tuning.farColorDesaturation;
+    waterUniforms.uHorizonLiftStrength.value = waterConfig.tuning.horizonLiftStrength;
+    waterUniforms.uMicroNormalScale.value = waterConfig.tuning.microNormalScale;
+    waterUniforms.uMicroNormalWeight.value = waterConfig.tuning.microNormalWeight;
+    waterUniforms.uSpecularGlintExponent.value = waterConfig.tuning.specularGlintExponent;
+    waterUniforms.uSpecularGlintStrength.value = waterConfig.tuning.specularGlintStrength;
+    waterUniforms.uCrestFoamStrength.value = waterConfig.tuning.crestFoamStrength;
+    waterUniforms.uCrestFoamThreshold.value = waterConfig.tuning.crestFoamThreshold;
     waterUniforms.uWakeDistortionStrength.value = 0.034 + waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity * 0.036;
     waterUniforms.uWakeFoamTintStrength.value = 0.096 + waterPreset.wakeIntensity * waterConfig.tuning.wakeIntensity * 0.108;
     waterUniforms.uFoamThreshold.value = waterConfig.tuning.foamThreshold;
@@ -784,6 +1078,23 @@ export function createEnvironment(
     waterUniforms.uNearHullDarkeningRadius.value = waterConfig.tuning.nearHullDarkeningRadius;
     waterUniforms.uCurvatureFoamStrength.value = waterConfig.tuning.curvatureFoamStrength;
     waterUniforms.uWavePeakHighlightStrength.value = waterConfig.tuning.wavePeakHighlightStrength;
+    waterUniforms.uLocalInteractionRadius.value = waterConfig.tuning.localInteractionRadius;
+    waterUniforms.uLocalInteractionLength.value = waterConfig.tuning.localInteractionLength;
+    waterUniforms.uBowInteractionStrength.value = waterConfig.tuning.bowInteractionStrength;
+    waterUniforms.uHullInteractionStrength.value = waterConfig.tuning.hullInteractionStrength;
+    waterUniforms.uInteractionNormalBoost.value = waterConfig.tuning.interactionNormalBoost;
+    waterUniforms.uBowRippleFrequency.value = waterConfig.tuning.bowRippleFrequency;
+    waterUniforms.uBowRippleStrength.value = waterConfig.tuning.bowRippleStrength;
+    waterUniforms.uNearFieldRadius.value = waterConfig.tuning.nearFieldRadius;
+    waterUniforms.uNearFieldNormalBoost.value = waterConfig.tuning.nearFieldNormalBoost;
+    waterUniforms.uNearFieldDetailBoost.value = waterConfig.tuning.nearFieldDetailBoost;
+    waterUniforms.uNearFieldContrastBoost.value = waterConfig.tuning.nearFieldContrastBoost;
+    waterUniforms.uDirectionalStreakStrength.value = waterConfig.tuning.directionalStreakStrength;
+    waterUniforms.uDirectionalStreakScale.value = waterConfig.tuning.directionalStreakScale;
+    waterUniforms.uDirectionalStreakAnisotropy.value = waterConfig.tuning.directionalStreakAnisotropy;
+    waterUniforms.uDisturbedSpecularBoost.value = waterConfig.tuning.disturbedSpecularBoost;
+    waterUniforms.uDisturbedHighlightFlicker.value = waterConfig.tuning.disturbedHighlightFlicker;
+    waterUniforms.uDisturbedContrastBoost.value = waterConfig.tuning.disturbedContrastBoost;
     waterUniforms.uShorelineEnabled.value = waterPreset.shorelineEnabled ? 1 : 0;
     waterUniforms.uShorelineStrength.value = waterPreset.shorelineStrength;
     waterUniforms.uDeepColor.value.set(waterConfig.tuning.deepColor);
@@ -858,6 +1169,7 @@ export function createEnvironment(
 
     sky.position.copy(lastCameraPosition);
     waterUniforms.uSunDirection.value.copy(effectiveSunDirection);
+    waterUniforms.uSkyColor.value.copy(skyUniforms.uHorizonColor.value).lerp(skyUniforms.uTopColor.value, 0.22);
     waterUniforms.fogColor.value.copy(fog.color);
     waterUniforms.fogDensity.value = fog.density;
   };
@@ -943,12 +1255,39 @@ export function createEnvironment(
         deepColor: waterConfig.tuning.deepColor,
         shallowColor: waterConfig.tuning.shallowColor,
         fresnelStrength: waterConfig.tuning.fresnelStrength,
+        reflectionBlendStrength: waterConfig.tuning.reflectionBlendStrength,
+        depthGradientDistanceMax: waterConfig.tuning.depthGradientDistanceMax,
+        farColorDesaturation: waterConfig.tuning.farColorDesaturation,
+        horizonLiftStrength: waterConfig.tuning.horizonLiftStrength,
+        microNormalScale: waterConfig.tuning.microNormalScale,
+        microNormalWeight: waterConfig.tuning.microNormalWeight,
+        specularGlintExponent: waterConfig.tuning.specularGlintExponent,
+        specularGlintStrength: waterConfig.tuning.specularGlintStrength,
+        crestFoamStrength: waterConfig.tuning.crestFoamStrength,
+        crestFoamThreshold: waterConfig.tuning.crestFoamThreshold,
         wakeIntensity: waterConfig.tuning.wakeIntensity,
         foamThreshold: waterConfig.tuning.foamThreshold,
         nearHullDarkeningStrength: waterConfig.tuning.nearHullDarkeningStrength,
         nearHullDarkeningRadius: waterConfig.tuning.nearHullDarkeningRadius,
         curvatureFoamStrength: waterConfig.tuning.curvatureFoamStrength,
-        wavePeakHighlightStrength: waterConfig.tuning.wavePeakHighlightStrength
+        wavePeakHighlightStrength: waterConfig.tuning.wavePeakHighlightStrength,
+        localInteractionRadius: waterConfig.tuning.localInteractionRadius,
+        localInteractionLength: waterConfig.tuning.localInteractionLength,
+        bowInteractionStrength: waterConfig.tuning.bowInteractionStrength,
+        hullInteractionStrength: waterConfig.tuning.hullInteractionStrength,
+        interactionNormalBoost: waterConfig.tuning.interactionNormalBoost,
+        bowRippleFrequency: waterConfig.tuning.bowRippleFrequency,
+        bowRippleStrength: waterConfig.tuning.bowRippleStrength,
+        nearFieldRadius: waterConfig.tuning.nearFieldRadius,
+        nearFieldNormalBoost: waterConfig.tuning.nearFieldNormalBoost,
+        nearFieldDetailBoost: waterConfig.tuning.nearFieldDetailBoost,
+        nearFieldContrastBoost: waterConfig.tuning.nearFieldContrastBoost,
+        directionalStreakStrength: waterConfig.tuning.directionalStreakStrength,
+        directionalStreakScale: waterConfig.tuning.directionalStreakScale,
+        directionalStreakAnisotropy: waterConfig.tuning.directionalStreakAnisotropy,
+        disturbedSpecularBoost: waterConfig.tuning.disturbedSpecularBoost,
+        disturbedHighlightFlicker: waterConfig.tuning.disturbedHighlightFlicker,
+        disturbedContrastBoost: waterConfig.tuning.disturbedContrastBoost
       }),
       setQuality: (quality) => {
         if (disposed) {
@@ -1050,6 +1389,7 @@ export function createEnvironment(
 
       water.position.set(context.cameraPosition.x, 0, context.cameraPosition.z);
       waterUniforms.uTime.value = context.renderTime;
+      waterUniforms.uWaterOriginXZ.value.set(water.position.x, water.position.z);
       waterUniforms.uCameraPos.value.set(context.cameraPosition.x, context.cameraPosition.y, context.cameraPosition.z);
       waterUniforms.uPlayerPos.value.set(context.playerPose.x, context.playerPose.z);
       const wakeInfluences = context.wakeInfluences ?? [];
@@ -1091,6 +1431,37 @@ export function createEnvironment(
           Math.max(0.2, influence.falloff),
           0
         );
+      }
+
+      const shipInfluences = context.shipInfluences ?? [];
+      const shipInfluenceCount = Math.min(WATER_MAX_SHIP_INFLUENCES, shipInfluences.length);
+      waterUniforms.uShipInfluenceCount.value = shipInfluenceCount;
+
+      for (let i = 0; i < WATER_MAX_SHIP_INFLUENCES; i += 1) {
+        const posDir = shipInfluencePosDirData[i];
+        const motion = shipInfluenceMotionData[i];
+        const hull = shipInfluenceHullData[i];
+        const influence = i < shipInfluenceCount ? shipInfluences[i] : undefined;
+
+        if (!posDir || !motion || !hull) {
+          continue;
+        }
+
+        if (!influence) {
+          posDir.set(0, 0, 0, 1);
+          motion.set(0, 0, 0, 0);
+          hull.set(5.2, 2.4, 0, 0);
+          continue;
+        }
+
+        posDir.set(influence.x, influence.z, influence.forwardX, influence.forwardZ);
+        motion.set(
+          Math.max(0, influence.speedNorm),
+          Math.max(0, influence.accelNorm),
+          Math.max(0, influence.turnNorm),
+          Math.max(0, influence.throttleNorm)
+        );
+        hull.set(Math.max(0.5, influence.hullLength), Math.max(0.3, influence.hullWidth), 0, 0);
       }
 
       let islandCount = 0;

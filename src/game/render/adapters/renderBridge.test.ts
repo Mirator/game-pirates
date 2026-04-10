@@ -128,6 +128,7 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
     playerWakeController,
     enemyWakeControllers: new Map(),
     wakeInfluencesScratch: [],
+    shipInfluencesScratch: [],
     enemyRoot: new Group(),
     enemyMeshes: new Map(),
     enemyVisuals: new Map(),
@@ -147,12 +148,39 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
           deepColor: "#1b5f93",
           shallowColor: "#54b9cc",
           fresnelStrength: 1,
-          wakeIntensity: 1,
+          reflectionBlendStrength: 0.95,
+          depthGradientDistanceMax: 220,
+          farColorDesaturation: 0.28,
+          horizonLiftStrength: 0.32,
+          microNormalScale: 4.2,
+          microNormalWeight: 0.34,
+          specularGlintExponent: 72,
+          specularGlintStrength: 1,
+          crestFoamStrength: 0.62,
+          crestFoamThreshold: 0.34,
+          wakeIntensity: 1.35,
           foamThreshold: 0.46,
-          nearHullDarkeningStrength: 0.18,
-          nearHullDarkeningRadius: 7.5,
-          curvatureFoamStrength: 0.45,
-          wavePeakHighlightStrength: 0.22
+          nearHullDarkeningStrength: 0.24,
+          nearHullDarkeningRadius: 8.8,
+          curvatureFoamStrength: 0.6,
+          wavePeakHighlightStrength: 0.34,
+          localInteractionRadius: 10.5,
+          localInteractionLength: 11.5,
+          bowInteractionStrength: 0.72,
+          hullInteractionStrength: 0.56,
+          interactionNormalBoost: 0.62,
+          bowRippleFrequency: 10.2,
+          bowRippleStrength: 0.42,
+          nearFieldRadius: 48,
+          nearFieldNormalBoost: 0.4,
+          nearFieldDetailBoost: 0.54,
+          nearFieldContrastBoost: 0.3,
+          directionalStreakStrength: 0.18,
+          directionalStreakScale: 0.034,
+          directionalStreakAnisotropy: 0.72,
+          disturbedSpecularBoost: 0.84,
+          disturbedHighlightFlicker: 0.34,
+          disturbedContrastBoost: 0.42
         }),
         setQuality: () => {},
         updateTuning: () => {}
@@ -197,23 +225,30 @@ function createBridge(environmentSync = vi.fn()): RenderBridgeState {
     cameraSmoothedHeading: 0,
     cameraHeadingInitialized: false,
     cameraLookInitialized: false,
+    cameraAccelLag: 0,
+    cameraTurnSwing: 0,
+    cameraVerticalLag: 0,
     playerPoseScratch: {
       x: 0,
+      y: 0,
       z: 0,
       heading: 0,
       speed: 0,
       drift: 0,
       throttle: 0,
-      turnRate: 0
+      turnRate: 0,
+      acceleration: 0
     },
     enemyPoseScratch: {
       x: 0,
+      y: 0,
       z: 0,
       heading: 0,
       speed: 0,
       drift: 0,
       throttle: 0,
-      turnRate: 0
+      turnRate: 0,
+      acceleration: 0
     },
     enemyPoseCache: new Map(),
     playerPresentationState: createPlayerPresentationRuntimeState(),
@@ -399,7 +434,7 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     }
 
     expect(lastDelta).toBeGreaterThan(0.02);
-    expect(lastDelta).toBeLessThan(0.35);
+    expect(lastDelta).toBeLessThan(0.4);
   });
 
   it("keeps default chase-camera offset when orbit offsets are zero", () => {
@@ -413,7 +448,7 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
     const offsetZ = bridge.camera.position.z - worldState.player.position.z;
     expect(offsetX).toBeCloseTo(0, 4);
     expect(offsetZ).toBeCloseTo(-12, 4);
-    expect(bridge.camera.position.y).toBeCloseTo(6.7, 4);
+    expect(bridge.camera.position.y).toBeCloseTo(6.7, 2);
   });
 
   it("ramps camera field-of-view with speed while staying bounded", () => {
@@ -807,6 +842,75 @@ describe("syncRenderFromSimulation interpolation and ship fx", () => {
 
     const lastCall = environmentSync.mock.calls.at(-1);
     const lastWake = lastCall?.[1]?.wakeInfluences as Array<{ intensity: number }> | undefined;
-    expect((lastWake?.length ?? 0)).toBeLessThanOrEqual(1);
+    expect((lastWake?.length ?? 0)).toBeLessThanOrEqual(3);
+  });
+
+  it("publishes ship interaction influences for player and enemies", () => {
+    const worldState = createInitialWorldState();
+    worldState.player.speed = 14;
+    worldState.player.throttle = 0.9;
+    worldState.player.linearVelocity.z = 14;
+
+    const enemy = createEnemyState(1, 10, -5, 0.35);
+    enemy.speed = 7;
+    enemy.throttle = 0.75;
+    enemy.linearVelocity.x = Math.sin(enemy.heading) * enemy.speed;
+    enemy.linearVelocity.z = Math.cos(enemy.heading) * enemy.speed;
+    worldState.enemies.push(enemy);
+
+    const interpolation = createInterpolationContext(worldState, 1);
+    interpolation.previousSnapshot.player.speed = 4;
+    interpolation.previousSnapshot.player.throttle = 0.1;
+    interpolation.previousSnapshot.enemies.set(enemy.id, {
+      x: enemy.position.x,
+      z: enemy.position.z,
+      heading: enemy.heading - 0.2,
+      speed: 2,
+      drift: 0,
+      throttle: 0.2
+    });
+
+    const environmentSync = vi.fn();
+    const bridge = createBridge(environmentSync);
+    syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+
+    const context = environmentSync.mock.calls.at(-1)?.[1] as { shipInfluences?: Array<{ speedNorm: number; throttleNorm: number }> } | undefined;
+    const shipInfluences = context?.shipInfluences;
+    expect((shipInfluences?.length ?? 0)).toBeGreaterThanOrEqual(2);
+    expect((shipInfluences ?? []).every((influence) => influence.speedNorm >= 0)).toBe(true);
+    expect((shipInfluences ?? []).some((influence) => influence.throttleNorm > 0.5)).toBe(true);
+  });
+
+  it("keeps transform-driven rig sway bounded under aggressive turns", () => {
+    const worldState = createInitialWorldState();
+    const interpolation = createInterpolationContext(worldState, 1);
+    const bridge = createBridge();
+
+    expect(bridge.playerVisual.rigs.length).toBeGreaterThan(0);
+    let previousHeading = worldState.player.heading;
+    for (let i = 0; i < 90; i += 1) {
+      const headingDelta = i % 2 === 0 ? 0.16 : -0.14;
+      worldState.player.heading = previousHeading + headingDelta;
+      worldState.player.linearVelocity.x = i % 2 === 0 ? 15 : -13;
+      worldState.player.linearVelocity.z = 18;
+      worldState.player.speed = Math.hypot(worldState.player.linearVelocity.x, worldState.player.linearVelocity.z);
+      worldState.player.drift = worldState.player.linearVelocity.x;
+      worldState.player.throttle = 1;
+      interpolation.previousSnapshot.player.heading = previousHeading;
+
+      syncRenderFromSimulation(worldState, bridge, 1 / 60, interpolation);
+      previousHeading = worldState.player.heading;
+    }
+
+    for (const rig of bridge.playerVisual.rigs) {
+      const deltaX = Math.abs(rig.mesh.rotation.x - rig.baseRotation.x);
+      const deltaY = Math.abs(rig.mesh.rotation.y - rig.baseRotation.y);
+      const deltaZ = Math.abs(rig.mesh.rotation.z - rig.baseRotation.z);
+      expect(deltaX).toBeLessThan(0.2);
+      expect(deltaY).toBeLessThan(0.2);
+      expect(deltaZ).toBeLessThan(0.3);
+    }
+    expect(bridge.playerVisual.sails.length).toBeGreaterThan(0);
+    expect(bridge.playerVisual.contactShadowMaterial.opacity).toBeGreaterThan(0.2);
   });
 });

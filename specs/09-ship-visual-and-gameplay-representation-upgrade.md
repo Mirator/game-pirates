@@ -25,13 +25,18 @@ render-only presentation feedback.
 - Spec 12: Player and Ship Movement System (authoritative handling outputs that
   drive visual cues).
 
-V2 MVP scope note:
+V3 MVP scope note:
 - Ship rendering is GLB-first with procedural fallback.
 - Shipping model set:
   - `player_v2`
   - `enemy_raider_v2`
   - `enemy_navy_v2`
 - Merchant reuses `enemy_raider_v2` geometry with calmer palette/material tuning.
+- Complexity targets for authored GLBs:
+  - `player_v2 >= 950` triangles
+  - `enemy_raider_v2 >= 750` triangles
+  - `enemy_navy_v2 >= 1200` triangles
+  - material count `<= 3` per ship.
 
 ## 1. Purpose
 
@@ -132,6 +137,15 @@ Motion source contract:
 - Physics pose remains the primary visual source; readability adjustments may use
   bounded visual exaggeration (`~1.1-1.2x`) but must never contradict
   authoritative buoyancy pose.
+- Alive-ship vertical readability is coupled to the freeboard guard from Spec 11
+  and Spec 12; presentation must respect that authority and must not add extra
+  sink offset while ship status is `alive`.
+- Waterline readability also depends on Spec 08 world-phase-lock behavior;
+  presentation layering must not hide or counteract freeboard corrections via
+  camera-relative sink/bob offsets.
+- Camera readability coupling follows Spec 08 constraints (bounded inertia/lag)
+  and wake layering follows Spec 10 three-band contracts; ship presentation must
+  remain compatible with both systems.
 
 ### 4.1 Tilt (Roll + Pitch)
 
@@ -269,6 +283,7 @@ class expansion.
   - `ship-presentation`
   - `ship-mast`
   - at least one sail node prefixed with `ship-sail`
+  - optional but collected rig-detail nodes prefixed with `ship-rig-`
   - `anchor-wake-stern`
   - `anchor-cannon-left-*`
   - `anchor-cannon-right-*`
@@ -291,7 +306,14 @@ class expansion.
 - Runtime ship visuals expose anchor-driven integration data:
   - stern wake offset from `anchor-wake-stern`
   - cannon-side mount anchors
-  - sail node references for render-only animation drivers.
+  - sail node references for render-only animation drivers
+  - rig mesh references (`ShipRigVisual[]`) collected from `ship-rig-*` for
+    bounded transform-driven sway.
+- Loader validation output must include:
+  - `triangleCount`
+  - `nodeCount`
+  - `materialCount`
+  and enforce model-specific complexity thresholds.
 
 ## Acceptance Criteria
 
@@ -318,3 +340,5 @@ class expansion.
 - Procedural fallback remains functional when GLB load/validation fails.
 - Wake stern placement uses anchor-driven offset when available.
 - Collider profiles stay simplified and independent from render mesh topology.
+- Rig-detail sway remains render-only and must not alter movement/physics
+  authority.

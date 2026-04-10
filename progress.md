@@ -145,3 +145,61 @@ review it all and fix root issue
 - `npm run test:e2e` passed (2/2).
 - `npm run build` passed.
 
+
+## Ship Visual Upgrade v3 (2026-04-09)
+- Rebuilt ship GLB generation (`scripts/generateShipGlbs.mjs`) for richer heroic-clean silhouettes with layered hull forms, railings, quarterdeck/stern shaping, bowsprit, richer cannon housings, and rig-detail meshes (`ship-rig-*`).
+- Regenerated in-place assets:
+  - `public/assets/ships/player_v2.glb`
+  - `public/assets/ships/enemy_raider_v2.glb`
+  - `public/assets/ships/enemy_navy_v2.glb`
+- Added generation-time complexity validation and logging (triangles/nodes/materials) with per-model minimums and max 3 materials.
+- Added shared runtime complexity contract (`shipAssetComplexity.ts`) and loader enforcement in `validateShipAssetContract`.
+- Extended loader contract + runtime instantiation:
+  - rig node collection (`ship-rig-*`)
+  - complexity metrics (`triangleCount`, `nodeCount`, `materialCount`)
+  - validated instantiation result with fallback metadata (`template_unavailable`).
+- Extended ship visuals with `ShipRigVisual[]` and rig extraction; added bounded transform-driven rig sway in presentation updates.
+- Added material polish pass using low-frequency procedural maps (wood normal/roughness + sail roughness variation), applied to procedural and GLB materials.
+- Updated tests:
+  - contract + complexity + fallback metadata (`shipAssetManifest.test.ts`)
+  - direct GLB complexity thresholds test (`shipAssetGlbComplexity.test.ts`)
+  - rig registration (`createShipMesh.test.ts`)
+  - bounded rig sway integration (`renderBridge.test.ts`).
+- Updated docs/specs: `README.md`, specs `09-12`, and `specs/README.md` for v3 contracts.
+
+## Verification (Ship Visual Upgrade v3)
+- `npm run test` passed (119/119).
+- `npm run test:e2e` passed (2/2).
+- `npm run build` passed.
+
+## Ship Visual Corrective Pass (2026-04-09, Late)
+- Per screenshot QA request, ran direct visual verification in live game camera and confirmed prior v3 pass still had detached-looking hull details (floating bow/figurehead feel and over-extended stern blocks).
+- Reworked `scripts/generateShipGlbs.mjs` hull/deck placement for coherent silhouettes while preserving GLB node contracts/anchors:
+  - rebuilt hull assembly around a continuous body envelope (no far-offset bow/stern chunks)
+  - corrected bow fitting placement (figurehead + bowsprit kept within bow envelope)
+  - tightened stern transom/cap/superstructure offsets to reduce trailing detached rear mass
+  - kept role palettes and required anchors (`anchor-wake-stern`, cannon side anchors) intact.
+- Regenerated ship assets:
+  - `public/assets/ships/player_v2.glb`
+  - `public/assets/ships/enemy_raider_v2.glb`
+  - `public/assets/ships/enemy_navy_v2.glb`
+- Latest generator metrics:
+  - player_v2: tris=3590, nodes=93, materials=3
+  - enemy_raider_v2: tris=3490, nodes=88, materials=3
+  - enemy_navy_v2: tris=4040, nodes=112, materials=3
+- Captured fresh verification screenshots (GLB path confirmed at runtime for player + enemies):
+  - `test-results/ship-visual-check-01-overview.png`
+  - `test-results/ship-visual-check-02-side-profile.png`
+  - `test-results/ship-visual-check-03-front-quarter.png`
+  - `test-results/ship-visual-check-04-enemy-lineup.png`
+- Stabilized one flaky minimap regression assertion under low-power e2e rendering:
+  - updated `e2e/controls-minimap-regression.spec.ts` to seed turning momentum and use more robust center-diff detection thresholds.
+
+## Verification (Corrective Pass)
+- `npm run test` passed (119/119).
+- `npm run test:e2e` passed (2/2).
+- `npm run build` passed.
+
+## Next-Agent Notes
+- If further visual polish is requested, focus on authored shape language first (deck sheer, rail profile, sail cut) before adding more micro-details.
+- Keep materials at <=3 per ship to preserve current draw-call discipline and contract tests.

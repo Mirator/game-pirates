@@ -2,17 +2,21 @@ import {
   Group,
   Material,
   Mesh,
-  MeshStandardMaterial,
   Object3D
 } from "three";
 import { getAllShipModelIds, type ShipModelId } from "../../ships/shipProfiles";
 import { getShipAssetUrl, SHIP_MATERIAL_PROFILES } from "./shipAssetManifest";
+import {
+  collectShipAssetComplexityMetrics,
+  validateShipAssetComplexity
+} from "./shipAssetComplexity";
 
 export const SHIP_NODE_NAMES = {
   root: "ship_root",
   presentation: "ship-presentation",
   mast: "ship-mast",
   sailPrefix: "ship-sail",
+  rigPrefix: "ship-rig-",
   flag: "ship-flag",
   wakeSternAnchor: "anchor-wake-stern",
   cannonLeftPrefix: "anchor-cannon-left-",
@@ -23,10 +27,13 @@ export interface ShipAssetNodeContract {
   presentationName: string;
   mastName: string;
   sailNames: string[];
+  rigNames: string[];
   flagName: string | null;
   wakeSternAnchorName: string;
   cannonLeftAnchorNames: string[];
   cannonRightAnchorNames: string[];
+  triangleCount: number;
+  nodeCount: number;
   materialCount: number;
 }
 
@@ -35,6 +42,23 @@ export interface ShipAssetTemplate {
   sourceUrl: string;
   root: Object3D;
   contract: ShipAssetNodeContract;
+}
+
+export interface ShipAssetFallbackMetadata {
+  used: true;
+  reason: "template_unavailable";
+}
+
+export interface ShipAssetInstance {
+  modelId: ShipModelId;
+  sourceUrl: string;
+  root: Group;
+  contract: ShipAssetNodeContract;
+}
+
+export interface ShipAssetInstanceResult {
+  instance: ShipAssetInstance | null;
+  fallback: ShipAssetFallbackMetadata | null;
 }
 
 const templateCache = new Map<ShipModelId, ShipAssetTemplate>();
@@ -66,31 +90,6 @@ function collectAnchors(root: Object3D, prefix: string): string[] {
   return names.sort(compareAnchorName);
 }
 
-function countUniqueStandardMaterials(root: Object3D): number {
-  const seen = new Set<Material>();
-  root.traverse((obj) => {
-    const mesh = obj as Mesh;
-    if (!mesh.isMesh || !mesh.material) {
-      return;
-    }
-
-    if (Array.isArray(mesh.material)) {
-      for (const material of mesh.material) {
-        if (material instanceof MeshStandardMaterial) {
-          seen.add(material);
-        }
-      }
-      return;
-    }
-
-    if (mesh.material instanceof MeshStandardMaterial) {
-      seen.add(mesh.material);
-    }
-  });
-
-  return seen.size;
-}
-
 export function validateShipAssetContract(modelId: ShipModelId, root: Object3D): { ok: true; contract: ShipAssetNodeContract } | { ok: false; errors: string[] } {
   const errors: string[] = [];
 
@@ -98,8 +97,10 @@ export function validateShipAssetContract(modelId: ShipModelId, root: Object3D):
   const mast = root.getObjectByName(SHIP_NODE_NAMES.mast);
   const wakeSternAnchor = root.getObjectByName(SHIP_NODE_NAMES.wakeSternAnchor);
   const sails = collectAnchors(root, SHIP_NODE_NAMES.sailPrefix);
+  const rigs = collectAnchors(root, SHIP_NODE_NAMES.rigPrefix);
   const cannonLeft = collectAnchors(root, SHIP_NODE_NAMES.cannonLeftPrefix);
   const cannonRight = collectAnchors(root, SHIP_NODE_NAMES.cannonRightPrefix);
+  const complexityMetrics = collectShipAssetComplexityMetrics(root);
 
   if (!presentation) {
     errors.push(`Missing '${SHIP_NODE_NAMES.presentation}'.`);
@@ -120,13 +121,14 @@ export function validateShipAssetContract(modelId: ShipModelId, root: Object3D):
     errors.push("Missing right cannon anchors.");
   }
 
-  const materialCount = countUniqueStandardMaterials(root);
+  const materialCount = complexityMetrics.materialCount;
   const materialProfile = SHIP_MATERIAL_PROFILES[MODEL_MATERIAL_PROFILE[modelId]];
   if (materialCount > materialProfile.maxMaterialCount) {
     errors.push(
       `Material count ${materialCount} exceeds max ${materialProfile.maxMaterialCount} for profile '${materialProfile.id}'.`
     );
   }
+  errors.push(...validateShipAssetComplexity(modelId, complexityMetrics));
 
   if (errors.length > 0) {
     return { ok: false, errors };
@@ -138,10 +140,13 @@ export function validateShipAssetContract(modelId: ShipModelId, root: Object3D):
       presentationName: SHIP_NODE_NAMES.presentation,
       mastName: SHIP_NODE_NAMES.mast,
       sailNames: sails,
+      rigNames: rigs,
       flagName: root.getObjectByName(SHIP_NODE_NAMES.flag)?.name ?? null,
       wakeSternAnchorName: SHIP_NODE_NAMES.wakeSternAnchor,
       cannonLeftAnchorNames: cannonLeft,
       cannonRightAnchorNames: cannonRight,
+      triangleCount: complexityMetrics.triangleCount,
+      nodeCount: complexityMetrics.nodeCount,
       materialCount
     }
   };
@@ -250,20 +255,42 @@ export function getPreloadedShipAssetTemplate(modelId: ShipModelId): ShipAssetTe
   return templateCache.get(modelId) ?? null;
 }
 
-export function instantiateShipAssetRoot(modelId: ShipModelId): Group | null {
+export function instantiateValidatedShipAsset(modelId: ShipModelId): ShipAssetInstanceResult {
   const template = templateCache.get(modelId);
   if (!template) {
-    return null;
-  }
-  const cloned = cloneRootWithUniqueMaterials(template.root);
-  if (cloned instanceof Group) {
-    return cloned;
+    return {
+      instance: null,
+      fallback: {
+        used: true,
+        reason: "template_unavailable"
+      }
+    };
   }
 
-  const wrapper = new Group();
-  wrapper.name = cloned.name || SHIP_NODE_NAMES.root;
-  wrapper.add(cloned);
-  return wrapper;
+  const cloned = cloneRootWithUniqueMaterials(template.root);
+  let root: Group;
+  if (cloned instanceof Group) {
+    root = cloned;
+  } else {
+    const wrapper = new Group();
+    wrapper.name = cloned.name || SHIP_NODE_NAMES.root;
+    wrapper.add(cloned);
+    root = wrapper;
+  }
+
+  return {
+    instance: {
+      modelId,
+      sourceUrl: template.sourceUrl,
+      root,
+      contract: template.contract
+    },
+    fallback: null
+  };
+}
+
+export function instantiateShipAssetRoot(modelId: ShipModelId): Group | null {
+  return instantiateValidatedShipAsset(modelId).instance?.root ?? null;
 }
 
 export function __resetShipAssetTemplateCacheForTests(): void {

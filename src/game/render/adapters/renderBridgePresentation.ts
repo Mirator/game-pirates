@@ -22,6 +22,12 @@ const SAIL_SWAY_MAX = 5 * DEG_TO_RAD;
 const SAIL_SWAY_NOISE_MAX = 1.2 * DEG_TO_RAD;
 const SAIL_FLUTTER_BASE = 0.6 * DEG_TO_RAD;
 const SAIL_FLUTTER_MAX = 1.5 * DEG_TO_RAD;
+const RIG_SWAY_MAX = 4.6 * DEG_TO_RAD;
+const RIG_TWIST_MAX = 2.2 * DEG_TO_RAD;
+const RIG_SWAY_NOISE_MAX = 0.9 * DEG_TO_RAD;
+const RIG_FLUTTER_MAX = 1.05 * DEG_TO_RAD;
+const RIG_SWAY_DAMPING = 5.2;
+const RIG_TWIST_DAMPING = 6.1;
 const CONTACT_DAMPING = 8.2;
 
 export interface ShipPresentationRuntimeState {
@@ -32,6 +38,8 @@ export interface ShipPresentationRuntimeState {
   sailTension: number;
   sailSway: number;
   sailFlutter: number;
+  rigSway: number;
+  rigTwist: number;
   speedBlend: number;
   contactScale: number;
   contactShadowOpacity: number;
@@ -76,6 +84,8 @@ function createShipPresentationRuntimeState(seed: number): ShipPresentationRunti
     sailTension: 0.35,
     sailSway: 0,
     sailFlutter: 0,
+    rigSway: 0,
+    rigTwist: 0,
     speedBlend: 0,
     contactScale: 1,
     contactShadowOpacity: 0.27,
@@ -142,6 +152,18 @@ export function applyShipPose(
   const targetSailFlutter =
     Math.sin(renderTime * (7 + presentation.speedBlend * 4.2) + presentation.flutterPhase) * flutterAmplitude;
   presentation.sailFlutter = dampExp(presentation.sailFlutter, targetSailFlutter, SAIL_FLUTTER_DAMPING, frameDt);
+  const targetRigSway = clamp(
+    (presentation.sailSway * 0.78 - turnNorm * 0.58) * lerp(0.34, 1, presentation.speedBlend),
+    -RIG_SWAY_MAX,
+    RIG_SWAY_MAX
+  );
+  presentation.rigSway = dampExp(presentation.rigSway, targetRigSway, RIG_SWAY_DAMPING, frameDt);
+  const targetRigTwist = clamp(
+    (presentation.sailFlutter * 0.42 + targetPitch * 0.35 + turnNorm * DEG_TO_RAD * 0.65),
+    -RIG_TWIST_MAX,
+    RIG_TWIST_MAX
+  );
+  presentation.rigTwist = dampExp(presentation.rigTwist, targetRigTwist, RIG_TWIST_DAMPING, frameDt);
 
   visual.group.position.set(pose.x, (pose.y ?? ship.position.y) + sinkOffset, pose.z);
   visual.group.rotation.set(0, pose.heading, 0);
@@ -179,6 +201,29 @@ export function applyShipPose(
       sail.baseScale.x * lerp(0.92, 1.08, presentation.sailTension),
       sail.baseScale.y * lerp(0.95, 1.05, presentation.sailTension),
       sail.baseScale.z
+    );
+  }
+  for (const [index, rig] of visual.rigs.entries()) {
+    const phase = rig.phaseOffset + index * 0.39 + presentation.noisePhase;
+    const swayNoise = Math.sin(renderTime * 2.9 + phase) * RIG_SWAY_NOISE_MAX;
+    const flutter =
+      Math.sin(renderTime * (5.1 + presentation.speedBlend * 2.5) + phase + presentation.flutterPhase) *
+      RIG_FLUTTER_MAX *
+      lerp(0.36, 1, presentation.speedBlend);
+    const rigSway = clamp((presentation.rigSway + swayNoise + flutter * 0.4) * rig.swayWeight, -RIG_SWAY_MAX, RIG_SWAY_MAX);
+    const rigTwist = clamp((presentation.rigTwist + flutter * 0.48) * rig.swayWeight, -RIG_TWIST_MAX, RIG_TWIST_MAX);
+
+    rig.mesh.position.copy(rig.basePosition);
+    rig.mesh.position.x += Math.sin(renderTime * 4.2 + phase) * (0.01 + presentation.speedBlend * 0.012) * rig.swayWeight;
+    rig.mesh.position.y += Math.cos(renderTime * 3.7 + phase) * (0.004 + presentation.speedBlend * 0.006) * rig.swayWeight;
+
+    rig.mesh.rotation.x = rig.baseRotation.x + rigTwist * 0.6;
+    rig.mesh.rotation.y = rig.baseRotation.y + rigSway * 0.34;
+    rig.mesh.rotation.z = rig.baseRotation.z + rigSway;
+    rig.mesh.scale.set(
+      rig.baseScale.x,
+      rig.baseScale.y * lerp(0.98, 1.04, presentation.speedBlend),
+      rig.baseScale.z
     );
   }
 

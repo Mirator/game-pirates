@@ -3,7 +3,7 @@
 Current browser prototype for the pirate game design:
 - stylized sea map with port marker and enemy spawns
 - gravity-based ship buoyancy physics with arcade-weighted handling, follow camera, and broadside cannon combat
-- GLB-first ship visuals (`player_v2`, `enemy_raider_v2`, `enemy_navy_v2`) with procedural fallback safety
+- GLB-first v3 ship visuals (`player_v2`, `enemy_raider_v2`, `enemy_navy_v2`) with procedural fallback safety, rig-detail sway hooks, and complexity gating
 - ballistic cannonballs and floating loot object water interaction
 - enemy spawn director (mixed merchant/raider/navy archetypes with staggered pressure and active enemy caps)
 - loot drops (gold, cargo, and repair materials)
@@ -27,6 +27,7 @@ Current browser prototype for the pirate game design:
 
 - `npm run dev`: start local dev server
 - `npm run assets:ships`: regenerate GLB ship assets in `public/assets/ships`
+  - generation enforces per-model complexity thresholds and max 3 materials per ship
 - `npm run build`: type-check and production build
 - `npm run test`: run simulation unit tests
 - `npm run test:e2e`: run Playwright browser smoke tests (CPU-capped, single worker by default)

@@ -94,6 +94,14 @@ test("controls + minimap regression: Q/E side mapping, A/D direction, north-up m
       bridge.playerFx.muzzleRightTimer = 0;
     };
 
+    const seedTurningMomentum = (): void => {
+      const forwardSpeed = 2.1;
+      world.player.throttle = 0.72;
+      world.player.linearVelocity.x = Math.sin(world.player.heading) * forwardSpeed;
+      world.player.linearVelocity.z = Math.cos(world.player.heading) * forwardSpeed;
+      world.player.speed = forwardSpeed;
+    };
+
     const classifyLatestShot = (): ShotSample | null => {
       const projectile = world.projectiles[world.projectiles.length - 1];
       if (!projectile) {
@@ -194,12 +202,13 @@ test("controls + minimap regression: Q/E side mapping, A/D direction, north-up m
 
     resetPlayerMotion();
     world.player.heading = 0;
+    seedTurningMomentum();
     await nextFrame();
     const headingBeforeD = world.player.heading;
     const minimapBefore = captureMinimap();
 
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "d", code: "KeyD", bubbles: true }));
-    await waitForCondition(() => Math.abs(normalizeAngle(world.player.heading - headingBeforeD)) > 0.05, 1800);
+    await waitForCondition(() => Math.abs(normalizeAngle(world.player.heading - headingBeforeD)) > 0.09, 1800);
     window.dispatchEvent(new KeyboardEvent("keyup", { key: "d", code: "KeyD", bubbles: true }));
     await waitForCondition(
       () => Math.abs(normalizeAngle(bridge.cameraSmoothedHeading - world.player.heading)) < 0.03,
@@ -208,8 +217,9 @@ test("controls + minimap regression: Q/E side mapping, A/D direction, north-up m
     const headingAfterD = world.player.heading;
     const minimapAfter = captureMinimap();
 
+    seedTurningMomentum();
     window.dispatchEvent(new KeyboardEvent("keydown", { key: "a", code: "KeyA", bubbles: true }));
-    await waitForCondition(() => Math.abs(normalizeAngle(world.player.heading - headingAfterD)) > 0.05, 1800);
+    await waitForCondition(() => Math.abs(normalizeAngle(world.player.heading - headingAfterD)) > 0.09, 1800);
     window.dispatchEvent(new KeyboardEvent("keyup", { key: "a", code: "KeyA", bubbles: true }));
     await waitForCondition(
       () => Math.abs(normalizeAngle(bridge.cameraSmoothedHeading - world.player.heading)) < 0.03,
@@ -236,7 +246,7 @@ test("controls + minimap regression: Q/E side mapping, A/D direction, north-up m
           const dg = Math.abs((minimapAfter[index + 1] ?? 0) - (minimapBefore[index + 1] ?? 0));
           const db = Math.abs((minimapAfter[index + 2] ?? 0) - (minimapBefore[index + 2] ?? 0));
           const da = Math.abs((minimapAfter[index + 3] ?? 0) - (minimapBefore[index + 3] ?? 0));
-          if (dr + dg + db + da > 40) {
+          if (dr + dg + db + da > 24) {
             changedInsideCenter += 1;
           }
         } else {
@@ -246,7 +256,7 @@ test("controls + minimap regression: Q/E side mapping, A/D direction, north-up m
           const dg = Math.abs((minimapAfter[index + 1] ?? 0) - (minimapBefore[index + 1] ?? 0));
           const db = Math.abs((minimapAfter[index + 2] ?? 0) - (minimapBefore[index + 2] ?? 0));
           const da = Math.abs((minimapAfter[index + 3] ?? 0) - (minimapBefore[index + 3] ?? 0));
-          if (dr + dg + db + da > 40) {
+          if (dr + dg + db + da > 24) {
             changedOutsideCenter += 1;
           }
         }

@@ -18,8 +18,13 @@ import {
   type ShipState,
   type WorldState
 } from "../../simulation";
+import {
+  MOVEMENT_ACCELERATION,
+  MOVEMENT_MAX_SPEED,
+  MOVEMENT_MAX_TURN_RATE
+} from "../../simulation/constants";
 import { calculateForwardVector as calculateForward, calculateLeftVector as calculateLeft } from "../../simulation/sideMath";
-import type { EnvironmentObjects } from "../objects/createEnvironment";
+import type { EnvironmentObjects, EnvironmentShipInfluence } from "../objects/createEnvironment";
 import { createShipDefinition, createShipMesh, type ShipVisual, type ShipVisualRole } from "../objects/createShipMesh";
 import {
   createShipWakeController,
@@ -93,6 +98,7 @@ interface InterpolatedShipPose {
   drift: number;
   throttle: number;
   turnRate: number;
+  acceleration: number;
 }
 
 export interface RenderBridgeState {
@@ -105,6 +111,7 @@ export interface RenderBridgeState {
   playerWakeController: ShipWakeController;
   enemyWakeControllers: Map<number, ShipWakeController>;
   wakeInfluencesScratch: WakeShaderInfluence[];
+  shipInfluencesScratch: EnvironmentShipInfluence[];
   enemyRoot: Group;
   enemyMeshes: Map<number, Group>;
   enemyVisuals: Map<number, ShipVisual>;
@@ -125,6 +132,9 @@ export interface RenderBridgeState {
   cameraSmoothedHeading: number;
   cameraHeadingInitialized: boolean;
   cameraLookInitialized: boolean;
+  cameraAccelLag: number;
+  cameraTurnSwing: number;
+  cameraVerticalLag: number;
   playerPoseScratch: InterpolatedShipPose;
   enemyPoseScratch: InterpolatedShipPose;
   enemyPoseCache: Map<number, InterpolatedShipPose>;
@@ -223,29 +233,33 @@ function setInterpolatedShipPose(
   target: InterpolatedShipPose
 ): void {
   if (!previous) {
+    const speed = getShipSpeed(ship);
     target.x = ship.position.x;
     target.y = ship.position.y;
     target.z = ship.position.z;
     target.heading = ship.heading;
     target.pitch = ship.pitch;
     target.roll = ship.roll;
-    target.speed = getShipSpeed(ship);
+    target.speed = speed;
     target.drift = getShipDrift(ship);
     target.throttle = ship.throttle;
     target.turnRate = 0;
+    target.acceleration = 0;
     return;
   }
 
+  const nextSpeed = getShipSpeed(ship);
   target.x = lerp(previous.x, ship.position.x, alpha);
   target.y = lerp(previous.y ?? ship.position.y, ship.position.y, alpha);
   target.z = lerp(previous.z, ship.position.z, alpha);
   target.heading = shortestAngleLerp(previous.heading, ship.heading, alpha);
   target.pitch = lerp(previous.pitch ?? ship.pitch, ship.pitch, alpha);
   target.roll = lerp(previous.roll ?? ship.roll, ship.roll, alpha);
-  target.speed = lerp(previous.speed, getShipSpeed(ship), alpha);
+  target.speed = lerp(previous.speed, nextSpeed, alpha);
   target.drift = lerp(previous.drift, getShipDrift(ship), alpha);
   target.throttle = lerp(previous.throttle, ship.throttle, alpha);
   target.turnRate = normalizeAngle(ship.heading - previous.heading) / Math.max(1e-5, fixedStep);
+  target.acceleration = (nextSpeed - previous.speed) / Math.max(1e-5, fixedStep);
 }
 
 function copyPose(target: InterpolatedShipPose, source: InterpolatedShipPose): void {
@@ -259,6 +273,7 @@ function copyPose(target: InterpolatedShipPose, source: InterpolatedShipPose): v
   target.drift = source.drift;
   target.throttle = source.throttle;
   target.turnRate = source.turnRate;
+  target.acceleration = source.acceleration;
 }
 
 function updateWakeController(
@@ -267,10 +282,11 @@ function updateWakeController(
   positionZ: number,
   heading: number,
   speed: number,
+  throttle: number,
   turnRate: number,
   boosting: boolean,
   frameDt: number
-): WakeShaderInfluence {
+): readonly WakeShaderInfluence[] {
   const forwardX = Math.sin(heading);
   const forwardZ = Math.cos(heading);
   const position = WAKE_POSITION_SCRATCH.set(positionX, 0, positionZ);
@@ -278,10 +294,33 @@ function updateWakeController(
 
   controller.setTransform(position, forward);
   controller.setSpeed(speed);
+  controller.setThrottle(throttle);
   controller.setTurnRate(turnRate);
   controller.setBoosting(boosting);
   controller.update(frameDt);
-  return controller.getShaderInfluence();
+  return controller.getShaderInfluences();
+}
+
+function appendShipInfluence(
+  target: EnvironmentShipInfluence[],
+  pose: InterpolatedShipPose,
+  visual: ShipVisual
+): void {
+  const silhouette = visual.definition.silhouette;
+  const forwardX = Math.sin(pose.heading);
+  const forwardZ = Math.cos(pose.heading);
+  target.push({
+    x: pose.x,
+    z: pose.z,
+    forwardX,
+    forwardZ,
+    speedNorm: clamp(Math.abs(pose.speed) / Math.max(1e-5, MOVEMENT_MAX_SPEED), 0, 1.6),
+    accelNorm: clamp(Math.abs(pose.acceleration) / Math.max(1e-5, MOVEMENT_ACCELERATION), 0, 1.8),
+    turnNorm: clamp(Math.abs(pose.turnRate) / Math.max(1e-5, MOVEMENT_MAX_TURN_RATE), 0, 1.8),
+    throttleNorm: clamp(Math.abs(pose.throttle), 0, 1),
+    hullLength: Math.max(2.8, silhouette.hullLength + silhouette.bowLength + silhouette.sternLength),
+    hullWidth: Math.max(1.2, silhouette.hullWidth)
+  });
 }
 
 function disposeGroup(group: Group): void {
@@ -365,7 +404,8 @@ export function syncRenderFromSimulation(
         speed: 0,
         drift: 0,
         throttle: 0,
-        turnRate: 0
+        turnRate: 0,
+        acceleration: 0
       };
       bridge.enemyPoseCache.set(enemy.id, cachedPose);
     }
@@ -455,39 +495,54 @@ export function syncRenderFromSimulation(
   }
 
   const wakeInfluences = bridge.wakeInfluencesScratch;
+  const shipInfluences = bridge.shipInfluencesScratch;
   wakeInfluences.length = 0;
-  const playerWakeInfluence = updateWakeController(
+  shipInfluences.length = 0;
+
+  appendShipInfluence(shipInfluences, playerPose, bridge.playerVisual);
+
+  const playerWakeInfluences = updateWakeController(
     bridge.playerWakeController,
     playerPose.x,
     playerPose.z,
     playerPose.heading,
     playerPose.speed,
+    playerPose.throttle,
     playerPose.turnRate,
     worldState.burst.active,
     frameDt
   );
-  if (playerWakeInfluence.intensity > 0.01) {
-    wakeInfluences.push(playerWakeInfluence);
+  for (const wakeInfluence of playerWakeInfluences) {
+    if (wakeInfluence.intensity > 0.01) {
+      wakeInfluences.push(wakeInfluence);
+    }
   }
 
   for (const enemy of worldState.enemies) {
     const enemyPose = bridge.enemyPoseCache.get(enemy.id);
     const enemyWakeController = bridge.enemyWakeControllers.get(enemy.id);
+    const enemyVisual = bridge.enemyVisuals.get(enemy.id);
     if (!enemyPose || !enemyWakeController) {
       continue;
     }
-    const wakeInfluence = updateWakeController(
+    if (enemyVisual) {
+      appendShipInfluence(shipInfluences, enemyPose, enemyVisual);
+    }
+    const enemyWakeInfluences = updateWakeController(
       enemyWakeController,
       enemyPose.x,
       enemyPose.z,
       enemyPose.heading,
       enemyPose.speed,
+      enemyPose.throttle,
       enemyPose.turnRate,
       false,
       frameDt
     );
-    if (wakeInfluence.intensity > 0.01) {
-      wakeInfluences.push(wakeInfluence);
+    for (const wakeInfluence of enemyWakeInfluences) {
+      if (wakeInfluence.intensity > 0.01) {
+        wakeInfluences.push(wakeInfluence);
+      }
     }
   }
 
@@ -537,6 +592,7 @@ export function syncRenderFromSimulation(
       speed: playerPose.speed,
       drift: playerPose.drift
     },
-    wakeInfluences
+    wakeInfluences,
+    shipInfluences
   });
 }

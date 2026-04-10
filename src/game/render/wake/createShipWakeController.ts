@@ -30,6 +30,7 @@ export interface WakeTuningControls {
   sternUvScrollSpeed: number;
   baseWakeWidth: number;
   widthBySpeedMultiplier: number;
+  widthByTurnMultiplier: number;
   ribbonStartWidthFactor: number;
   ribbonEndWidthFactor: number;
   maxWakeLifetime: number;
@@ -40,6 +41,19 @@ export interface WakeTuningControls {
   foamTintAmount: number;
   distortionLength: number;
   distortionFalloff: number;
+  coreBandStrength: number;
+  trailBandStrength: number;
+  outerBandStrength: number;
+  coreBandWidthMultiplier: number;
+  trailBandWidthMultiplier: number;
+  outerBandWidthMultiplier: number;
+  coreBandLengthMultiplier: number;
+  trailBandLengthMultiplier: number;
+  outerBandLengthMultiplier: number;
+  outerBandLifetimeMultiplier: number;
+  turnAsymmetryStrength: number;
+  throttleInfluenceStrength: number;
+  accelerationInfluenceStrength: number;
   sprayBaseOpacity: number;
   sprayBoostMultiplier: number;
 }
@@ -69,10 +83,11 @@ export interface WakeShaderInfluence {
 export interface ShipWakeController {
   update(deltaTime: number): void;
   setSpeed(speed: number): void;
+  setThrottle(throttle: number): void;
   setTransform(position: Vector3, forward: Vector3): void;
   setTurnRate(turnRate: number): void;
   setBoosting(boosting: boolean): void;
-  getShaderInfluence(): WakeShaderInfluence;
+  getShaderInfluences(): readonly WakeShaderInfluence[];
   getRoot(): Group;
   dispose(): void;
 }
@@ -106,6 +121,7 @@ const QUALITY_BASE_TUNING: Record<WakeQualityLevel, WakeTuningControls> = {
     sternUvScrollSpeed: 0.44,
     baseWakeWidth: 0.5,
     widthBySpeedMultiplier: 0.025,
+    widthByTurnMultiplier: 0.2,
     ribbonStartWidthFactor: 0.32,
     ribbonEndWidthFactor: 1.25,
     maxWakeLifetime: 2.4,
@@ -116,6 +132,19 @@ const QUALITY_BASE_TUNING: Record<WakeQualityLevel, WakeTuningControls> = {
     foamTintAmount: 0.14,
     distortionLength: 6.5,
     distortionFalloff: 1.3,
+    coreBandStrength: 1.02,
+    trailBandStrength: 0.82,
+    outerBandStrength: 0.48,
+    coreBandWidthMultiplier: 0.82,
+    trailBandWidthMultiplier: 1.38,
+    outerBandWidthMultiplier: 2.0,
+    coreBandLengthMultiplier: 0.38,
+    trailBandLengthMultiplier: 1.0,
+    outerBandLengthMultiplier: 1.82,
+    outerBandLifetimeMultiplier: 1.45,
+    turnAsymmetryStrength: 0.3,
+    throttleInfluenceStrength: 0.28,
+    accelerationInfluenceStrength: 0.26,
     sprayBaseOpacity: 0.0,
     sprayBoostMultiplier: 0.0
   },
@@ -129,6 +158,7 @@ const QUALITY_BASE_TUNING: Record<WakeQualityLevel, WakeTuningControls> = {
     sternUvScrollSpeed: 0.62,
     baseWakeWidth: 0.58,
     widthBySpeedMultiplier: 0.03,
+    widthByTurnMultiplier: 0.28,
     ribbonStartWidthFactor: 0.3,
     ribbonEndWidthFactor: 1.35,
     maxWakeLifetime: 3.1,
@@ -139,6 +169,19 @@ const QUALITY_BASE_TUNING: Record<WakeQualityLevel, WakeTuningControls> = {
     foamTintAmount: 0.2,
     distortionLength: 8.5,
     distortionFalloff: 1.45,
+    coreBandStrength: 1.12,
+    trailBandStrength: 0.92,
+    outerBandStrength: 0.54,
+    coreBandWidthMultiplier: 0.86,
+    trailBandWidthMultiplier: 1.5,
+    outerBandWidthMultiplier: 2.22,
+    coreBandLengthMultiplier: 0.42,
+    trailBandLengthMultiplier: 1.1,
+    outerBandLengthMultiplier: 2.0,
+    outerBandLifetimeMultiplier: 1.65,
+    turnAsymmetryStrength: 0.38,
+    throttleInfluenceStrength: 0.38,
+    accelerationInfluenceStrength: 0.35,
     sprayBaseOpacity: 0.0,
     sprayBoostMultiplier: 0.16
   },
@@ -152,6 +195,7 @@ const QUALITY_BASE_TUNING: Record<WakeQualityLevel, WakeTuningControls> = {
     sternUvScrollSpeed: 0.84,
     baseWakeWidth: 0.62,
     widthBySpeedMultiplier: 0.034,
+    widthByTurnMultiplier: 0.34,
     ribbonStartWidthFactor: 0.28,
     ribbonEndWidthFactor: 1.45,
     maxWakeLifetime: 3.8,
@@ -162,6 +206,19 @@ const QUALITY_BASE_TUNING: Record<WakeQualityLevel, WakeTuningControls> = {
     foamTintAmount: 0.28,
     distortionLength: 10.5,
     distortionFalloff: 1.62,
+    coreBandStrength: 1.22,
+    trailBandStrength: 1.0,
+    outerBandStrength: 0.62,
+    coreBandWidthMultiplier: 0.92,
+    trailBandWidthMultiplier: 1.62,
+    outerBandWidthMultiplier: 2.36,
+    coreBandLengthMultiplier: 0.45,
+    trailBandLengthMultiplier: 1.18,
+    outerBandLengthMultiplier: 2.18,
+    outerBandLifetimeMultiplier: 1.8,
+    turnAsymmetryStrength: 0.45,
+    throttleInfluenceStrength: 0.46,
+    accelerationInfluenceStrength: 0.44,
     sprayBaseOpacity: 0.0,
     sprayBoostMultiplier: 0.24
   }
@@ -327,6 +384,23 @@ function createSternPatchTexture(size: number): DataTexture {
 const FOAM_TEXTURE = createNoiseTexture(128, 1.7);
 const BREAKUP_TEXTURE = createNoiseTexture(128, 9.2);
 const STERN_TEXTURE = createSternPatchTexture(96);
+const WAKE_LAYER_COUNT = 3;
+
+function createEmptyWakeInfluence(): WakeShaderInfluence {
+  return {
+    sternX: 0,
+    sternZ: 0,
+    forwardX: 0,
+    forwardZ: 1,
+    intensity: 0,
+    width: 0,
+    length: 0,
+    turn: 0,
+    normalBoost: 0,
+    foamTint: 0,
+    falloff: 1
+  };
+}
 
 class ShipWakeControllerImpl implements ShipWakeController {
   private readonly maxSamples: number;
@@ -361,6 +435,9 @@ class ShipWakeControllerImpl implements ShipWakeController {
   private position = new Vector3();
   private forward = new Vector3(0, 0, 1);
   private speed = 0;
+  private previousSpeed = 0;
+  private liveAcceleration = 0;
+  private throttle = 0;
   private turnRate = 0;
   private boosting = false;
   private time = 0;
@@ -370,19 +447,10 @@ class ShipWakeControllerImpl implements ShipWakeController {
   private liveIntensity = 0;
   private liveWidth = 0;
   private liveLength = 0;
-  private influence: WakeShaderInfluence = {
-    sternX: 0,
-    sternZ: 0,
-    forwardX: 0,
-    forwardZ: 1,
-    intensity: 0,
-    width: 0,
-    length: 0,
-    turn: 0,
-    normalBoost: 0,
-    foamTint: 0,
-    falloff: 1
-  };
+  private readonly influences: WakeShaderInfluence[] = Array.from(
+    { length: WAKE_LAYER_COUNT },
+    () => createEmptyWakeInfluence()
+  );
   private readonly samples: WakeSample[] = [];
 
   constructor(options: ShipWakeControllerOptions) {
@@ -509,16 +577,30 @@ class ShipWakeControllerImpl implements ShipWakeController {
     this.sampleTimer += dt;
 
     const speedAbs = Math.abs(this.speed);
+    const acceleration = dt > 1e-5 ? (this.speed - this.previousSpeed) / dt : 0;
+    this.previousSpeed = this.speed;
+    const accelerationFollow = 1 - Math.exp(-7.6 * dt);
+    this.liveAcceleration = lerp(this.liveAcceleration, acceleration, accelerationFollow);
     const speedNorm = clamp((speedAbs - this.tuning.minSpeedThreshold * 0.2) / 8, 0, 1);
     const turnNorm = clamp(Math.abs(this.turnRate) * 0.045, 0, 1);
+    const accelNorm = clamp(Math.abs(this.liveAcceleration) / 8.5, 0, 1);
     const boostFactor = this.boosting ? 1 : 0;
-    const targetIntensity = clamp(speedNorm * 1.02 + turnNorm * 0.3 + boostFactor * 0.25, 0, 1);
+    const throttleNorm = clamp(Math.abs(this.throttle), 0, 1);
+    const targetIntensity = clamp(
+      speedNorm * 1.02 +
+        turnNorm * 0.3 +
+        boostFactor * 0.25 +
+        throttleNorm * this.tuning.throttleInfluenceStrength +
+        accelNorm * this.tuning.accelerationInfluenceStrength,
+      0,
+      1
+    );
     const follow = targetIntensity > this.liveIntensity ? 1 - Math.exp(-8.2 * dt) : 1 - Math.exp(-3.8 * dt);
     this.liveIntensity = lerp(this.liveIntensity, targetIntensity, follow);
     this.liveWidth =
       this.tuning.baseWakeWidth +
       speedAbs * this.tuning.widthBySpeedMultiplier +
-      turnNorm * this.tuning.baseWakeWidth * 0.45 +
+      turnNorm * this.tuning.baseWakeWidth * this.tuning.widthByTurnMultiplier +
       (this.boosting ? this.tuning.baseWakeWidth * 0.24 : 0);
     this.liveLength = this.tuning.distortionLength * (0.6 + speedNorm * 1.2 + turnNorm * 0.32 + boostFactor * 0.2);
 
@@ -527,11 +609,15 @@ class ShipWakeControllerImpl implements ShipWakeController {
     this.rebuildRibbon();
     this.updateSternPatch(speedNorm);
     this.updateSpray(speedNorm);
-    this.updateInfluence();
+    this.updateInfluences();
   }
 
   setSpeed(speed: number): void {
     this.speed = speed;
+  }
+
+  setThrottle(throttle: number): void {
+    this.throttle = clamp(throttle, -1, 1);
   }
 
   setTransform(position: Vector3, forward: Vector3): void {
@@ -552,8 +638,8 @@ class ShipWakeControllerImpl implements ShipWakeController {
     this.boosting = boosting;
   }
 
-  getShaderInfluence(): WakeShaderInfluence {
-    return this.influence;
+  getShaderInfluences(): readonly WakeShaderInfluence[] {
+    return this.influences;
   }
 
   getRoot(): Group {
@@ -730,7 +816,7 @@ class ShipWakeControllerImpl implements ShipWakeController {
     uniforms.uTime.value = this.time;
     uniforms.uTextureScrollSpeed.value = this.tuning.textureScrollSpeed;
     uniforms.uEdgeSoftness.value = this.tuning.edgeSoftness;
-    uniforms.uOpacity.value = 0.2 + this.liveIntensity * 0.34;
+    uniforms.uOpacity.value = 0.1 + this.liveIntensity * 0.2;
   }
 
   private writeWakeTriangle(
@@ -791,11 +877,11 @@ class ShipWakeControllerImpl implements ShipWakeController {
     const jitter = Math.sin(this.time * 3.6 + sternPos.x * 0.12 + sternPos.z * 0.11) * 0.04;
     const turnNorm = clamp(Math.abs(this.turnRate) * 0.05, 0, 1);
     this.sternMesh.scale.set(
-      this.tuning.sternPatchWidth * (1 + speedNorm * 0.24 + turnNorm * 0.28 + (this.boosting ? 0.14 : 0)),
-      this.tuning.sternPatchLength * (1 + speedNorm * 0.28),
+      this.tuning.sternPatchWidth * (1 + speedNorm * 0.18 + turnNorm * 0.22 + (this.boosting ? 0.1 : 0)),
+      this.tuning.sternPatchLength * (0.86 + speedNorm * 0.22),
       1
     );
-    this.sternMaterial.opacity = this.tuning.sternOpacity * intensity * (0.84 + jitter);
+    this.sternMaterial.opacity = this.tuning.sternOpacity * intensity * (0.68 + jitter * 0.55);
 
     if (this.sternMaterial.alphaMap) {
       const alphaMap = this.sternMaterial.alphaMap;
@@ -848,12 +934,8 @@ class ShipWakeControllerImpl implements ShipWakeController {
     }
   }
 
-  private updateInfluence(): void {
+  private updateInfluences(): void {
     const sternPos = this.computeSternPosition(this.tmpB);
-    this.influence.sternX = sternPos.x;
-    this.influence.sternZ = sternPos.z;
-    this.influence.forwardX = this.forward.x;
-    this.influence.forwardZ = this.forward.z;
     let sampledLength = 0;
     for (let i = 1; i < this.samples.length; i += 1) {
       const prev = this.samples[i - 1];
@@ -864,13 +946,70 @@ class ShipWakeControllerImpl implements ShipWakeController {
       sampledLength += prev.position.distanceTo(current.position);
     }
 
-    this.influence.intensity = clamp(this.liveIntensity, 0, 1);
-    this.influence.width = this.liveWidth;
-    this.influence.length = Math.min(this.liveLength, sampledLength * 0.85 + this.tuning.baseWakeWidth * 2.2);
-    this.influence.turn = clamp(this.turnRate * 0.06, -1, 1);
-    this.influence.normalBoost = this.tuning.normalBoostAmount;
-    this.influence.foamTint = this.tuning.foamTintAmount;
-    this.influence.falloff = this.tuning.distortionFalloff;
+    const baseLength = Math.min(this.liveLength, sampledLength * 0.85 + this.tuning.baseWakeWidth * 2.2);
+    const speedNorm = clamp((Math.abs(this.speed) - this.tuning.minSpeedThreshold * 0.2) / 8, 0, 1);
+    const turnNorm = clamp(Math.abs(this.turnRate) * 0.045, 0, 1);
+    const accelNorm = clamp(Math.abs(this.liveAcceleration) / 8.5, 0, 1);
+    const throttleNorm = clamp(Math.abs(this.throttle), 0, 1);
+    const boostNorm = this.boosting ? 1 : 0;
+    const energy = clamp(
+      speedNorm * 0.64 +
+        turnNorm * 0.4 +
+        accelNorm * this.tuning.accelerationInfluenceStrength +
+        throttleNorm * this.tuning.throttleInfluenceStrength +
+        boostNorm * 0.24,
+      0,
+      1.6
+    );
+
+    const turnSigned = clamp(this.turnRate * 0.06, -1, 1);
+    const turnAsymmetry = 1 + Math.abs(turnSigned) * this.tuning.turnAsymmetryStrength;
+
+    const core = this.influences[0] ?? createEmptyWakeInfluence();
+    const trail = this.influences[1] ?? createEmptyWakeInfluence();
+    const outer = this.influences[2] ?? createEmptyWakeInfluence();
+    this.influences[0] = core;
+    this.influences[1] = trail;
+    this.influences[2] = outer;
+
+    core.sternX = sternPos.x;
+    core.sternZ = sternPos.z;
+    core.forwardX = this.forward.x;
+    core.forwardZ = this.forward.z;
+    core.intensity = clamp(this.liveIntensity * this.tuning.coreBandStrength * (0.75 + energy * 0.4), 0, 1.2);
+    core.width = this.liveWidth * this.tuning.coreBandWidthMultiplier * (0.8 + turnNorm * 0.2 * turnAsymmetry);
+    core.length = Math.max(0.001, baseLength * this.tuning.coreBandLengthMultiplier);
+    core.turn = turnSigned;
+    core.normalBoost = this.tuning.normalBoostAmount * (1.1 + accelNorm * 0.28);
+    core.foamTint = this.tuning.foamTintAmount * (1.2 + throttleNorm * 0.18);
+    core.falloff = this.tuning.distortionFalloff * 1.05;
+
+    trail.sternX = sternPos.x;
+    trail.sternZ = sternPos.z;
+    trail.forwardX = this.forward.x;
+    trail.forwardZ = this.forward.z;
+    trail.intensity = clamp(this.liveIntensity * this.tuning.trailBandStrength * (0.7 + energy * 0.35), 0, 1.1);
+    trail.width = this.liveWidth * this.tuning.trailBandWidthMultiplier * (0.92 + turnNorm * 0.28 * turnAsymmetry);
+    trail.length = Math.max(0.001, baseLength * this.tuning.trailBandLengthMultiplier);
+    trail.turn = turnSigned;
+    trail.normalBoost = this.tuning.normalBoostAmount * (0.9 + turnNorm * 0.3);
+    trail.foamTint = this.tuning.foamTintAmount * (0.9 + throttleNorm * 0.18);
+    trail.falloff = this.tuning.distortionFalloff;
+
+    outer.sternX = sternPos.x;
+    outer.sternZ = sternPos.z;
+    outer.forwardX = this.forward.x;
+    outer.forwardZ = this.forward.z;
+    outer.intensity = clamp(this.liveIntensity * this.tuning.outerBandStrength * (0.6 + energy * 0.3), 0, 0.95);
+    outer.width = this.liveWidth * this.tuning.outerBandWidthMultiplier * (1 + turnNorm * 0.35 * turnAsymmetry);
+    outer.length = Math.max(
+      0.001,
+      baseLength * this.tuning.outerBandLengthMultiplier * this.tuning.outerBandLifetimeMultiplier
+    );
+    outer.turn = turnSigned;
+    outer.normalBoost = this.tuning.normalBoostAmount * 0.72;
+    outer.foamTint = this.tuning.foamTintAmount * 0.58;
+    outer.falloff = this.tuning.distortionFalloff * 0.68;
   }
 }
 

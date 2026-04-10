@@ -10,9 +10,22 @@ export type {
 } from "./adapters/renderBridge";
 export { createRenderWorld } from "./createRenderWorld";
 export { createShipDefinition } from "./objects/createShipMesh";
-export type { ShipAssetSource, ShipClass, ShipDefinition, ShipSilhouette, ShipVisualRole } from "./objects/createShipMesh";
+export type {
+  ShipAssetSource,
+  ShipClass,
+  ShipDefinition,
+  ShipRigVisual,
+  ShipSilhouette,
+  ShipVisualRole
+} from "./objects/createShipMesh";
 export { preloadShipAssetsForBrowser } from "./objects/shipAssetLoader";
-export type { ShipAssetNodeContract, ShipAssetTemplate } from "./objects/shipAssetLoader";
+export type {
+  ShipAssetFallbackMetadata,
+  ShipAssetInstance,
+  ShipAssetInstanceResult,
+  ShipAssetNodeContract,
+  ShipAssetTemplate
+} from "./objects/shipAssetLoader";
 export type { ShipColliderProfileId, ShipMaterialProfileId, ShipModelId } from "../ships/shipProfiles";
 export { createShipWakeController } from "./wake/createShipWakeController";
 export { createWakeDebugSurface, getWakeGlobalTuning, updateWakeGlobalTuning } from "./wake/createShipWakeController";

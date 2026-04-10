@@ -43,6 +43,7 @@ describe("createShipMesh ship factory", () => {
       expect(ship.getObjectByName("ship-wake-foam")).toBeTruthy();
       expect(visual.presentation.name).toBe("ship-presentation");
       expect(visual.sails.length).toBeGreaterThanOrEqual(1);
+      expect(visual.rigs.length).toBeGreaterThanOrEqual(1);
       expect(visual.cannonMounts.left.length).toBe(definition.silhouette.cannonMountsPerSide);
       expect(visual.cannonMounts.right.length).toBe(definition.silhouette.cannonMountsPerSide);
     }
@@ -101,5 +102,15 @@ describe("createShipMesh ship factory", () => {
     const firstFlashChannel = visual.flashChannels[2];
     expect(firstFlashChannel).toBeDefined();
     expect(firstFlashChannel?.material.emissiveIntensity ?? 0).toBeGreaterThan(0);
+  });
+
+  it("registers procedural rig meshes under ship-rig-* for secondary sway", () => {
+    const visual = createShipMesh(createShipDefinition("player"));
+    expect(visual.rigs.length).toBeGreaterThan(0);
+    for (const rig of visual.rigs) {
+      expect(rig.mesh.name.startsWith("ship-rig-")).toBe(true);
+      expect(rig.swayWeight).toBeGreaterThan(0);
+      expect(rig.swayWeight).toBeLessThanOrEqual(1.2);
+    }
   });
 });

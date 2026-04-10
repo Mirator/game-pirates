@@ -17,6 +17,7 @@ import {
   Object3D,
   PlaneGeometry,
   RGBAFormat,
+  RepeatWrapping,
   Shape,
   ShapeGeometry,
   UnsignedByteType,
@@ -30,7 +31,7 @@ import {
   type ShipModelId,
   type ShipVisualRole
 } from "../../ships/shipProfiles";
-import { instantiateShipAssetRoot, SHIP_NODE_NAMES } from "./shipAssetLoader";
+import { instantiateValidatedShipAsset, SHIP_NODE_NAMES } from "./shipAssetLoader";
 
 export type { ShipVisualRole } from "../../ships/shipProfiles";
 
@@ -103,6 +104,15 @@ export interface ShipSailVisual {
   phaseOffset: number;
 }
 
+export interface ShipRigVisual {
+  mesh: Mesh;
+  baseRotation: { x: number; y: number; z: number };
+  basePosition: Vector3;
+  baseScale: Vector3;
+  phaseOffset: number;
+  swayWeight: number;
+}
+
 export interface ShipVisual {
   group: Group;
   presentation: Group;
@@ -111,6 +121,7 @@ export interface ShipVisual {
   materialCount: number;
   wakeSternOffset: number;
   sails: ShipSailVisual[];
+  rigs: ShipRigVisual[];
   contactShadow: Mesh;
   contactShadowMaterial: MeshBasicMaterial;
   contactPatch: Mesh;
@@ -497,6 +508,136 @@ const WAKE_TRAIL_ALPHA_TEXTURE = createWakeAlphaTexture("trail");
 const WAKE_FOAM_ALPHA_TEXTURE = createWakeAlphaTexture("foam");
 const CONTACT_SHADOW_ALPHA_TEXTURE = createContactAlphaTexture(1.0);
 const CONTACT_PATCH_ALPHA_TEXTURE = createContactAlphaTexture(0.78);
+const WOOD_NORMAL_TEXTURE = createSurfaceTexture("wood-normal");
+const WOOD_ROUGHNESS_TEXTURE = createSurfaceTexture("wood-roughness");
+const SAIL_ROUGHNESS_TEXTURE = createSurfaceTexture("sail-roughness");
+
+function createSurfaceTexture(kind: "wood-normal" | "wood-roughness" | "sail-roughness"): DataTexture {
+  const size = 64;
+  const data = new Uint8Array(size * size * 4);
+
+  for (let y = 0; y < size; y += 1) {
+    const v = y / (size - 1);
+    for (let x = 0; x < size; x += 1) {
+      const u = x / (size - 1);
+      const idx = (y * size + x) * 4;
+
+      if (kind === "wood-normal") {
+        const grain = Math.sin((u * 6.5 + v * 0.8) * Math.PI * 2) * 0.11;
+        const wobble = Math.sin((u * 1.5 + v * 4.4) * Math.PI * 2) * 0.06;
+        const nx = 0.5 + grain + wobble;
+        const ny = 0.5 + Math.sin((u * 4.8 - v * 3.3) * Math.PI * 2) * 0.08;
+        const centeredX = (nx - 0.5) * 2;
+        const centeredY = (ny - 0.5) * 2;
+        const centeredZ = Math.sqrt(Math.max(0.02, 1 - centeredX * centeredX - centeredY * centeredY));
+        const nz = centeredZ * 0.5 + 0.5;
+        data[idx] = Math.max(0, Math.min(255, Math.round(nx * 255)));
+        data[idx + 1] = Math.max(0, Math.min(255, Math.round(ny * 255)));
+        data[idx + 2] = Math.max(0, Math.min(255, Math.round(nz * 255)));
+        data[idx + 3] = 255;
+        continue;
+      }
+
+      if (kind === "wood-roughness") {
+        const stripe = 0.6 + Math.sin((u * 5.2 + v * 0.7) * Math.PI * 2) * 0.17;
+        const blotch = 0.18 + Math.sin((u * 1.7 - v * 2.8) * Math.PI * 2) * 0.12;
+        const value = Math.max(0, Math.min(1, stripe + blotch));
+        const byte = Math.round(value * 255);
+        data[idx] = byte;
+        data[idx + 1] = byte;
+        data[idx + 2] = byte;
+        data[idx + 3] = 255;
+        continue;
+      }
+
+      const weave =
+        0.74 +
+        Math.sin((u * 8 + v * 0.3) * Math.PI * 2) * 0.1 +
+        Math.sin((v * 7.5 + u * 0.3) * Math.PI * 2) * 0.1;
+      const value = Math.max(0.45, Math.min(0.96, weave));
+      const byte = Math.round(value * 255);
+      data[idx] = byte;
+      data[idx + 1] = byte;
+      data[idx + 2] = byte;
+      data[idx + 3] = 255;
+    }
+  }
+
+  const texture = new DataTexture(data, size, size, RGBAFormat, UnsignedByteType);
+  texture.wrapS = RepeatWrapping;
+  texture.wrapT = RepeatWrapping;
+  texture.magFilter = LinearFilter;
+  texture.minFilter = LinearFilter;
+  texture.generateMipmaps = false;
+  texture.needsUpdate = true;
+  return texture;
+}
+
+function applyShipMaterialColor(material: MeshStandardMaterial, palette: ShipPalette): void {
+  const materialName = material.name.toLowerCase();
+  if (materialName.includes("sail")) {
+    material.color.set(palette.sail);
+    return;
+  }
+  if (materialName.includes("cannon")) {
+    material.color.set(palette.cannon);
+    return;
+  }
+  if (materialName.includes("deck")) {
+    material.color.set(palette.deck);
+    return;
+  }
+  if (materialName.includes("mast")) {
+    material.color.set(palette.mast);
+    return;
+  }
+  if (materialName.includes("accent")) {
+    material.color.set(palette.accent);
+    return;
+  }
+  material.color.set(palette.hull);
+}
+
+function applyShipMaterialPolish(material: MeshStandardMaterial, role: ShipVisualRole): void {
+  const materialName = material.name.toLowerCase();
+  const isSail = materialName.includes("sail");
+  const isAccent = materialName.includes("accent");
+  const isCannon = materialName.includes("cannon");
+  const playerSailBoost = role === "player" ? 0.02 : 0;
+
+  if (isSail) {
+    material.roughnessMap = SAIL_ROUGHNESS_TEXTURE;
+    material.roughness = 0.78;
+    material.metalness = 0.02;
+    material.normalMap = null;
+    material.side = DoubleSide;
+    material.flatShading = false;
+    material.emissive.copy(material.color);
+    material.emissiveIntensity = 0.06 + playerSailBoost;
+    material.needsUpdate = true;
+    return;
+  }
+
+  material.roughnessMap = WOOD_ROUGHNESS_TEXTURE;
+  material.normalMap = WOOD_NORMAL_TEXTURE;
+  if (isAccent || isCannon) {
+    material.roughness = 0.46;
+    material.metalness = 0.22;
+    material.normalScale.set(0.22, 0.22);
+  } else {
+    material.roughness = 0.82;
+    material.metalness = 0.06;
+    material.normalScale.set(0.36, 0.28);
+  }
+  material.needsUpdate = true;
+}
+
+function tuneShipMaterials(materials: MeshStandardMaterial[], role: ShipVisualRole, palette: ShipPalette): void {
+  for (const material of materials) {
+    applyShipMaterialColor(material, palette);
+    applyShipMaterialPolish(material, role);
+  }
+}
 
 function getBaseDefinition(role: ShipVisualRole): ShipDefinition {
   const style = ROLE_STYLES[role];
@@ -622,6 +763,37 @@ function collectSailsFromRoot(root: Object3D): ShipSailVisual[] {
   return sails;
 }
 
+function createRigVisual(mesh: Mesh, index: number, swayWeight: number): ShipRigVisual {
+  return {
+    mesh,
+    baseRotation: {
+      x: mesh.rotation.x,
+      y: mesh.rotation.y,
+      z: mesh.rotation.z
+    },
+    basePosition: mesh.position.clone(),
+    baseScale: mesh.scale.clone(),
+    phaseOffset: index * 0.41,
+    swayWeight
+  };
+}
+
+function collectRigsFromRoot(root: Object3D): ShipRigVisual[] {
+  const rigs: Mesh[] = [];
+  root.traverse((obj) => {
+    const mesh = obj as Mesh;
+    if (!mesh.isMesh || !mesh.name.startsWith(SHIP_NODE_NAMES.rigPrefix)) {
+      return;
+    }
+    rigs.push(mesh);
+  });
+
+  rigs.sort((a, b) => a.name.localeCompare(b.name));
+  return rigs.map((mesh, index) =>
+    createRigVisual(mesh, index, mesh.name.includes("pennant") ? 1.16 : 0.78)
+  );
+}
+
 function collectAnchorMounts(root: Object3D, prefix: string, intoLocalSpace: Object3D): Vector3[] {
   const anchors: { order: number; point: Vector3 }[] = [];
   const scratch = new Vector3();
@@ -686,6 +858,9 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   group.userData.requestedAssetSource = requestedAssetSource;
   group.userData.assetSource = resolvedAssetSource;
   group.userData.assetFallback = null;
+  group.userData.assetFallbackReason = null;
+  group.userData.triangleCount = 0;
+  group.userData.nodeCount = 0;
 
   const presentation = new Group();
   presentation.name = "ship-presentation";
@@ -695,6 +870,10 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   const deckMaterial = createMaterial(palette.deck, { roughness: 0.88, metalness: 0.04 });
   const mastMaterial = createMaterial(palette.mast, { roughness: 0.86, metalness: 0.04 });
   const sailMaterial = createDoubleSidedMaterial(palette.sail, { roughness: 0.76, metalness: 0.02 });
+  hullMaterial.name = "procedural-wood-hull";
+  deckMaterial.name = "procedural-wood-deck";
+  mastMaterial.name = "procedural-wood-mast";
+  sailMaterial.name = "procedural-sail";
   sailMaterial.flatShading = false;
   sailMaterial.emissive.set(palette.sail);
   sailMaterial.emissiveIntensity = 0.08;
@@ -703,7 +882,10 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
     metalness: 0.1,
     emissiveIntensity: 0.08
   });
+  accentMaterial.name = "procedural-accent";
   const cannonMaterial = createMaterial(palette.cannon, { roughness: 0.38, metalness: 0.32 });
+  cannonMaterial.name = "procedural-accent-cannon";
+  tuneShipMaterials([hullMaterial, deckMaterial, mastMaterial, sailMaterial, accentMaterial, cannonMaterial], definition.role, palette);
 
   const hull = enableShadows(
     new Mesh(new BoxGeometry(silhouette.hullWidth, silhouette.hullHeight, silhouette.hullLength), hullMaterial)
@@ -781,6 +963,55 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
       phaseOffset: 0
     }
   ];
+
+  const rigs: ShipRigVisual[] = [];
+  const rigA = enableShadows(
+    new Mesh(
+      new CylinderGeometry(silhouette.mastRadius * 0.12, silhouette.mastRadius * 0.12, silhouette.mastHeight * 0.75, 6),
+      mastMaterial
+    )
+  );
+  rigA.name = "ship-rig-shroud-left";
+  rigA.position.set(-silhouette.hullWidth * 0.28, silhouette.hullHeight + silhouette.mastHeight * 0.52, silhouette.sailOffsetZ * 0.18);
+  rigA.rotation.z = Math.PI * 0.15;
+  presentation.add(rigA);
+  rigs.push(createRigVisual(rigA, rigs.length, 0.72));
+
+  const rigB = enableShadows(
+    new Mesh(
+      new CylinderGeometry(silhouette.mastRadius * 0.12, silhouette.mastRadius * 0.12, silhouette.mastHeight * 0.75, 6),
+      mastMaterial
+    )
+  );
+  rigB.name = "ship-rig-shroud-right";
+  rigB.position.set(silhouette.hullWidth * 0.28, silhouette.hullHeight + silhouette.mastHeight * 0.52, silhouette.sailOffsetZ * 0.18);
+  rigB.rotation.z = -Math.PI * 0.15;
+  presentation.add(rigB);
+  rigs.push(createRigVisual(rigB, rigs.length, 0.72));
+
+  const rigC = enableShadows(
+    new Mesh(
+      new CylinderGeometry(silhouette.mastRadius * 0.1, silhouette.mastRadius * 0.1, silhouette.hullLength * 0.56, 6),
+      mastMaterial
+    )
+  );
+  rigC.name = "ship-rig-stay-fore";
+  rigC.position.set(0, silhouette.hullHeight + silhouette.mastHeight * 0.64, silhouette.hullLength * 0.16);
+  rigC.rotation.x = -Math.PI * 0.23;
+  presentation.add(rigC);
+  rigs.push(createRigVisual(rigC, rigs.length, 0.64));
+
+  const rigPennant = new Mesh(
+    new PlaneGeometry(silhouette.flagWidth * 0.9, silhouette.flagHeight * 0.42),
+    sailMaterial
+  );
+  rigPennant.name = "ship-rig-pennant-main";
+  rigPennant.castShadow = false;
+  rigPennant.receiveShadow = false;
+  rigPennant.position.set(0.14, silhouette.hullHeight + silhouette.mastHeight * 0.88, silhouette.sailOffsetZ * 0.2);
+  rigPennant.rotation.y = definition.role === "player" ? -Math.PI * 0.16 : Math.PI * 0.18;
+  presentation.add(rigPennant);
+  rigs.push(createRigVisual(rigPennant, rigs.length, 1.14));
 
   const flag = enableShadows(
     new Mesh(new PlaneGeometry(silhouette.flagWidth, silhouette.flagHeight), accentMaterial)
@@ -952,7 +1183,8 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
   let flashChannels = registerFlashChannels([hullMaterial, deckMaterial, sailMaterial, accentMaterial, cannonMaterial]);
 
   if (requestedAssetSource === "gltf") {
-    const assetRoot = instantiateShipAssetRoot(definition.modelId);
+    const assetResult = instantiateValidatedShipAsset(definition.modelId);
+    const assetRoot = assetResult.instance?.root ?? null;
     if (assetRoot) {
       const oldChildren = [...presentation.children];
       for (const child of oldChildren) {
@@ -980,6 +1212,9 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
         sails.length = 0;
         sails.push(...assetSails);
       }
+      const assetRigs = collectRigsFromRoot(assetRoot);
+      rigs.length = 0;
+      rigs.push(...assetRigs);
 
       const sternAnchor = assetRoot.getObjectByName(SHIP_NODE_NAMES.wakeSternAnchor);
       if (sternAnchor) {
@@ -1054,13 +1289,18 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
 
       const gltfMaterials = getUniqueStandardMaterials(assetRoot);
       if (gltfMaterials.length > 0) {
+        tuneShipMaterials(gltfMaterials, definition.role, palette);
         flashChannels = registerFlashChannels(gltfMaterials);
       }
-      materialCount = countStandardMaterials(assetRoot);
+      materialCount = assetResult.instance?.contract.materialCount ?? countStandardMaterials(assetRoot);
       resolvedAssetSource = "gltf";
       group.userData.assetFallback = null;
+      group.userData.assetFallbackReason = null;
+      group.userData.triangleCount = assetResult.instance?.contract.triangleCount ?? 0;
+      group.userData.nodeCount = assetResult.instance?.contract.nodeCount ?? 0;
     } else {
       group.userData.assetFallback = definition.fallbackPolicy;
+      group.userData.assetFallbackReason = assetResult.fallback?.reason ?? "template_unavailable";
     }
   }
 
@@ -1080,6 +1320,7 @@ export function createShipMesh(definition: ShipDefinition): ShipVisual {
     materialCount,
     wakeSternOffset,
     sails,
+    rigs,
     contactShadow,
     contactShadowMaterial,
     contactPatch,

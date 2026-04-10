@@ -19,6 +19,8 @@ runtime contracts.
 
 - Spec 11 provides authoritative ship physics state (position/heading/velocity)
   that wake sampling should consume.
+- Spec 08 is canonical for water shading/perception contracts that consume wake
+  influence.
 
 ## 1. Scope
 
@@ -43,11 +45,11 @@ The wake is a visual effect system, not a fluid solver.
 - Support both player and enemy ships.
 - Remain feasible in Three.js on desktop browser targets.
 
-## 3. Visual Breakdown
+## 3. Visual Breakdown (Required Three-Band Contract)
 
 The wake system is composed of three layers.
 
-### 3.1 Stern Turbulence Layer
+### 3.1 Core Stern Turbulence Band
 
 Localized foam/disturbance directly behind the ship stern.
 
@@ -56,7 +58,7 @@ Purpose:
 - strongest disturbance zone.
 - visually anchors wake to hull.
 
-### 3.2 Wake Ribbon Layer
+### 3.2 Main Wake Trail Band
 
 Main trailing wake extending behind the ship.
 
@@ -65,14 +67,20 @@ Purpose:
 - provides the visible wake body.
 - fades naturally over distance/time.
 
-### 3.3 Water Disturbance Layer
+### 3.3 Outer Disturbance Band
 
 Subtle water normal/shading distortion under the wake.
 
 Purpose:
-- blend wake into ocean.
-- prevent "decal pasted on top" look.
-- add richer movement.
+- broad low-contrast disturbance spread.
+- persists longer than core/trail.
+- reads primarily via normal/highlight breakup, not bright white foam strips.
+
+Persistence rule:
+
+- Core band = shortest lifetime.
+- Main trail = medium lifetime.
+- Outer disturbance = longest lifetime with the softest intensity.
 
 ## 4. Functional Requirements
 
@@ -86,6 +94,8 @@ Requirements:
 - wake grows progressively with speed.
 - wake reduces when ship slows down.
 - turn rate must increase wake strength and side disturbance response.
+- throttle and acceleration must also modulate wake readability (burstier starts,
+  stronger decel fade behavior) while remaining render-only.
 
 Inputs:
 - ship world position.
@@ -187,6 +197,12 @@ MVP shipping approach:
 - Feed wake influence into the water shader when a custom water shader is
   available, adding altered normal intensity, brightness/foam tint shift, and
   subtle directional distortion.
+- Feed trailing foam-mask influence into water shading so wake reads embedded,
+  not overlaid.
+- Maintain compatibility with under-hull local darkening/disturbance cues from
+  water perception contracts.
+- Turn-asymmetric wake influence must propagate to water shading masks, not only
+  ribbon geometry.
 
 If direct shader integration is not available:
 - Render wake ribbon with shading tuned to match ocean colors/lighting as
@@ -203,6 +219,8 @@ Requirements:
 - curved ship motion produces curved wake trail.
 - stronger turn rate may slightly widen stern turbulence.
 - hard turns should produce visible side-biased foam/disturbance asymmetry.
+- asymmetry should favor outer-side widening/brightness during hard turns (e.g.,
+  left turn may widen/brighten right side and vice versa).
 
 This should emerge primarily from trail sampling, not handcrafted branch logic.
 
@@ -222,6 +240,13 @@ Parameters also affected by turn intensity:
 - stern turbulence width.
 - side disturbance asymmetry.
 - wake width gain while turning.
+- trailing foam-mask asymmetry in water shading.
+
+Parameters additionally affected by throttle and acceleration:
+
+- core turbulence burstiness.
+- main trail brightness ramp-up/ramp-down.
+- short-lived disturbance spikes during accel/decel pulses.
 
 Suggested states:
 - idle.
@@ -255,10 +280,23 @@ Suggested responsibilities:
 interface ShipWakeController {
   update(deltaTime: number): void
   setSpeed(speed: number): void
+  setThrottle(throttle: number): void
   setTransform(position: Vector3, forward: Vector3): void
+  setTurnRate(turnRate: number): void
+  setBoosting(boosting: boolean): void
+  getShaderInfluences(): readonly WakeShaderInfluence[]
   dispose(): void
 }
 ```
+
+Stern anchor contract:
+
+- Wake controllers must consume stern origin from validated ship visual anchor
+  `anchor-wake-stern` when present.
+- If the anchor is unavailable (load/validation fallback), controllers may use a
+  collider/silhouette stern offset fallback.
+- Geometry/visual upgrades must not require wake-system code changes as long as
+  the stern anchor contract is preserved.
 
 ### 5.2 Movement Sampling
 
@@ -404,7 +442,16 @@ Disturbance:
 - foam tint amount.
 - distortion length.
 - distortion falloff.
+- core/trail/outer band strengths.
+- core/trail/outer width multipliers.
+- core/trail/outer length multipliers.
+- outer lifetime multiplier.
 - turn asymmetry strength.
+- trailing foam-mask strength.
+- under-hull compatibility multiplier (prevents visual contradiction with local
+  darkening cues).
+- throttle influence strength.
+- acceleration influence strength.
 
 ## 8. Quality Levels
 
@@ -431,16 +478,25 @@ Visual:
 - wake no longer appears as a single transparent polygon.
 - disturbance begins directly at stern.
 - wake fades naturally over distance.
+- wake visually presents three readable bands (core/trail/outer).
 - wake shape follows ship path, including turns.
 - wake intensity scales with speed.
+- wake intensity and side bias scale with turn intensity.
+- wake burstiness scales with throttle/acceleration.
 - wake visually reads as foam/disturbed water.
 - wake does not appear as a continuous bright strip or cone.
+- wake disturbance integrates with water shading cues (including ship-proximity
+  interaction zone) without contradiction.
 
 Technical:
 - system supports multiple ships simultaneously.
 - no severe transparency sorting artifacts in normal gameplay.
 - no major performance spikes from wake updates.
 - trail geometry remains stable during movement and turning.
+- wake influence inputs remain simulation-derived and do not introduce gameplay
+  authority writes.
+- layered shader influence output remains bounded and stable under multi-ship
+  load (player + enemies).
 
 ## 10. Recommended MVP Implementation Order
 

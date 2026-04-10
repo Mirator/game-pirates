@@ -20,7 +20,13 @@ import {
   PLAYER_BURST_SPEED_MULTIPLIER,
   PLAYER_BURST_THRUST_MULTIPLIER,
   PLAYER_BURST_TURN_MULTIPLIER,
-  SHIP_SAFE_SUBMERGE_DEPTH,
+  SHIP_SAFE_DESCENT_VELOCITY_CAP,
+  SHIP_SAFE_SUBMERGE_DEPTH_ABSOLUTE_MAX,
+  SHIP_SAFE_SUBMERGE_DEPTH_DRAFT_RATIO,
+  SHIP_SAFE_SOFT_RECOVERY_GAIN,
+  SHIP_SAFE_SUBMERGE_HARD_BAND,
+  SHIP_SAFE_SUBMERGE_PROBE_PEAK_BLEND,
+  SHIP_SAFE_SUBMERGE_SOFT_BAND,
   STORM_SPEED_MULTIPLIER
 } from "../../constants";
 import type { ShipState } from "../../types";
@@ -33,7 +39,7 @@ import type { WorldWithEcs } from "../types";
 const BUOYANCY_VERTICAL_RESPONSE_MULT = 1.25;
 const BUOYANCY_BOW_PROBE_MULT = 1.12;
 const BUOYANCY_STERN_PROBE_MULT = 0.92;
-const BUOYANCY_MICRO_SUBMERGE_THRESHOLD = 0.015;
+const BUOYANCY_MICRO_SUBMERGE_THRESHOLD = 0.01;
 
 export interface MovementScales {
   accelerationScale: number;
@@ -71,6 +77,33 @@ function seaHeight(worldState: WorldWithEcs, x: number, z: number): number {
     worldState.physics.seaLevel +
     sampleWaterHeight(DEFAULT_WATER_SURFACE_WAVES, { x, z }, worldState.time, DEFAULT_WATER_SURFACE_TUNING)
   );
+}
+
+function sampleProbeWaterReference(
+  worldState: WorldWithEcs,
+  ship: ShipState,
+  forward = forwardOf(ship.heading),
+  left = leftOf(ship.heading)
+): number {
+  let probeWaterSum = 0;
+  let probeWaterCount = 0;
+  let probeWaterMax = Number.NEGATIVE_INFINITY;
+  for (const probe of ship.buoyancyProbes) {
+    const wx = ship.position.x + left.x * probe.localOffset.x + forward.x * probe.localOffset.z;
+    const wz = ship.position.z + left.z * probe.localOffset.x + forward.z * probe.localOffset.z;
+    const wh = seaHeight(worldState, wx, wz);
+    probeWaterSum += wh;
+    probeWaterCount += 1;
+    probeWaterMax = Math.max(probeWaterMax, wh);
+  }
+
+  const centerWaterHeight = seaHeight(worldState, ship.position.x, ship.position.z);
+  if (probeWaterCount <= 0) {
+    return centerWaterHeight;
+  }
+  const probeWaterAverage = probeWaterSum / probeWaterCount;
+  const probeWaterReference = lerp(probeWaterAverage, probeWaterMax, SHIP_SAFE_SUBMERGE_PROBE_PEAK_BLEND);
+  return Math.max(centerWaterHeight, probeWaterReference);
 }
 
 function insideStorm(worldState: WorldWithEcs, ship: ShipState): boolean {
@@ -226,18 +259,30 @@ export function updateShipPhysics(
   ship.heading = normalizeAngle(ship.heading + ship.angularVelocity * dt);
   ship.pitch = clamp(ship.pitch + ship.pitchVelocity * dt, -0.36, 0.36);
   ship.roll = clamp(ship.roll + ship.rollVelocity * dt, -0.42, 0.42);
-  ship.pitch += -ship.pitch * clamp(dt * 0.6, 0, 1);
-  ship.roll += -ship.roll * clamp(dt * 0.65, 0, 1);
+  ship.pitch += -ship.pitch * clamp(dt * 0.5, 0, 1);
+  ship.roll += -ship.roll * clamp(dt * 0.55, 0, 1);
 
   ship.position.x += ship.linearVelocity.x * dt;
   ship.position.y = clamp(ship.position.y + ship.linearVelocity.y * dt, -8, 6);
   ship.position.z += ship.linearVelocity.z * dt;
 
-  const centerWaterHeight = seaHeight(worldState, ship.position.x, ship.position.z);
-  const minSafeHeight = centerWaterHeight - SHIP_SAFE_SUBMERGE_DEPTH;
-  if (ship.position.y < minSafeHeight) {
-    ship.position.y = minSafeHeight;
-    ship.linearVelocity.y = Math.max(ship.linearVelocity.y, -0.35);
+  const safeWaterRef = sampleProbeWaterReference(worldState, ship);
+  const allowedDepth = Math.min(
+    SHIP_SAFE_SUBMERGE_DEPTH_ABSOLUTE_MAX,
+    ship.hull.draft * SHIP_SAFE_SUBMERGE_DEPTH_DRAFT_RATIO
+  );
+  const minSafeHeight = safeWaterRef - allowedDepth;
+  const penetration = minSafeHeight - ship.position.y;
+  if (penetration > 0) {
+    ship.linearVelocity.y = Math.max(ship.linearVelocity.y, SHIP_SAFE_DESCENT_VELOCITY_CAP);
+    if (penetration > SHIP_SAFE_SUBMERGE_HARD_BAND) {
+      ship.position.y = minSafeHeight;
+    } else if (penetration > SHIP_SAFE_SUBMERGE_SOFT_BAND) {
+      const bandWidth = Math.max(1e-5, SHIP_SAFE_SUBMERGE_HARD_BAND - SHIP_SAFE_SUBMERGE_SOFT_BAND);
+      const softBandAlpha = clamp((penetration - SHIP_SAFE_SUBMERGE_SOFT_BAND) / bandWidth, 0, 1);
+      const recoveryVelocity = penetration * SHIP_SAFE_SOFT_RECOVERY_GAIN * softBandAlpha;
+      ship.linearVelocity.y = Math.max(ship.linearVelocity.y, recoveryVelocity);
+    }
   }
 
   const af = forwardOf(ship.heading);

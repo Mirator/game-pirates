@@ -109,6 +109,20 @@ Ships are rigid floating bodies with:
   jitter from tiny wave noise.
 - Vertical ship displacement authority remains buoyancy-driven with no
   presentation override path.
+- Alive ships must be clamped by a bounded freeboard guard computed from a
+  hull-aware water reference sampled from the ship's current integrated pose:
+  - `safeWaterRef = max(centerWaterHeight, lerp(probeWaterAvg, probeWaterMax, probePeakBlend))`
+  - `allowedDepth = min(absoluteDepthCap, hullDraft * draftDepthRatio)`
+  - `aliveMinHeight = safeWaterRef - allowedDepth`
+  - `penetration = aliveMinHeight - shipY`
+  - if `penetration <= 0`: no guard correction
+  - if `0 < penetration <= softBand`: apply descent velocity cap only
+  - if `softBand < penetration <= hardBand`: apply upward recovery velocity +
+    descent cap
+  - if `penetration > hardBand`: hard positional clamp to `aliveMinHeight` +
+    descent cap
+- The freeboard guard is a readability/stability safety rail for alive ships
+  only and must not remove natural bob/pitch/roll behavior.
 
 ### Motion and Turning
 
@@ -157,6 +171,15 @@ Destroyed ships:
 - lose buoyancy support over time.
 - settle lower and tilt progressively.
 - end as respawn (player) or removal/wreckage (enemy/debris rules).
+- bypass alive freeboard guard constraints while sinking progression is active.
+
+Alive vs sinking authority split:
+
+- `status === "alive"`:
+  - buoyancy probes + drag + alive freeboard guard are authoritative.
+- `status === "sinking"`:
+  - sinking progression authority takes over; alive freeboard guard no longer
+    constrains vertical descent.
 
 ### Recoil and Impact Forces
 
@@ -193,6 +216,9 @@ Collider profile ownership rule:
 - Navy uses a heavier collider profile.
 - Render mesh complexity or topology changes must not silently alter physics
   collider behavior.
+- V3 ship visual upgrades (higher triangle counts, extra rig meshes, silhouette
+  polish) are presentation-only and must not change collider dimensions unless
+  collider profiles are explicitly re-authored.
 
 ### Water Height Sampling
 
@@ -257,6 +283,8 @@ Expose gameplay-tunable parameters for:
 - all major dynamic objects follow coherent gravity-based rules.
 - simulation remains stable in normal gameplay.
 - behavior is consistent across player, enemy, and projectiles.
+- alive freeboard guard remains protective but does not pin ships to the floor
+  during normal idle wave motion.
 
 ## Engineering Notes
 

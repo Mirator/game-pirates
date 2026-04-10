@@ -6,7 +6,12 @@ import {
   ENEMY_STAGGER_SPAWN_DELAY,
   FIXED_TIME_STEP,
   PORT_POSITION,
-  SHIP_SAFE_SUBMERGE_DEPTH,
+  SHIP_SAFE_DESCENT_VELOCITY_CAP,
+  SHIP_SAFE_SUBMERGE_DEPTH_ABSOLUTE_MAX,
+  SHIP_SAFE_SUBMERGE_DEPTH_DRAFT_RATIO,
+  SHIP_SAFE_SUBMERGE_HARD_BAND,
+  SHIP_SAFE_SUBMERGE_PROBE_PEAK_BLEND,
+  SHIP_SAFE_SUBMERGE_SOFT_BAND,
   SHIP_SPAWN_FREEBOARD,
   SINK_DURATION,
   createInitialWorldState,
@@ -17,6 +22,7 @@ import {
   type InputState,
   type LootState,
   type ProjectileState,
+  type ShipState,
   type WorldState
 } from ".";
 import { DEFAULT_WATER_SURFACE_TUNING, DEFAULT_WATER_SURFACE_WAVES } from "../physics/waterProfile";
@@ -107,6 +113,44 @@ function quietWorld(worldState: WorldState): void {
 
 function seaHeightAt(worldState: WorldState, x: number, z: number): number {
   return worldState.physics.seaLevel + sampleWaterHeight(DEFAULT_WATER_SURFACE_WAVES, { x, z }, worldState.time, DEFAULT_WATER_SURFACE_TUNING);
+}
+
+function sampleProbeWaterHeights(worldState: WorldState, ship: ShipState): { average: number; peak: number } {
+  const forwardX = Math.sin(ship.heading);
+  const forwardZ = Math.cos(ship.heading);
+  const leftX = -forwardZ;
+  const leftZ = forwardX;
+  let sum = 0;
+  let peak = Number.NEGATIVE_INFINITY;
+  let count = 0;
+
+  for (const probe of ship.buoyancyProbes) {
+    const wx = ship.position.x + leftX * probe.localOffset.x + forwardX * probe.localOffset.z;
+    const wz = ship.position.z + leftZ * probe.localOffset.x + forwardZ * probe.localOffset.z;
+    const waterHeight = seaHeightAt(worldState, wx, wz);
+    sum += waterHeight;
+    peak = Math.max(peak, waterHeight);
+    count += 1;
+  }
+
+  const center = seaHeightAt(worldState, ship.position.x, ship.position.z);
+  if (count === 0) {
+    return { average: center, peak: center };
+  }
+  return { average: sum / count, peak };
+}
+
+function computeAliveMinSafeHeight(worldState: WorldState, ship: ShipState): number {
+  const centerWaterHeight = seaHeightAt(worldState, ship.position.x, ship.position.z);
+  const probeWater = sampleProbeWaterHeights(worldState, ship);
+  const probeReference =
+    probeWater.average + (probeWater.peak - probeWater.average) * SHIP_SAFE_SUBMERGE_PROBE_PEAK_BLEND;
+  const safeWaterRef = Math.max(centerWaterHeight, probeReference);
+  const allowedDepth = Math.min(
+    SHIP_SAFE_SUBMERGE_DEPTH_ABSOLUTE_MAX,
+    ship.hull.draft * SHIP_SAFE_SUBMERGE_DEPTH_DRAFT_RATIO
+  );
+  return safeWaterRef - allowedDepth;
 }
 
 function setPlayerVelocityFromLocalAxes(worldState: WorldState, forwardSpeed: number, driftSpeed: number): void {
@@ -480,19 +524,146 @@ describe("updateSimulation ECS pipeline", () => {
     expect(elapsed - SINK_DURATION).toBeLessThanOrEqual(FIXED_TIME_STEP + 1e-6);
   });
 
-  it("keeps alive ships from remaining deeply submerged after spawn", () => {
+  it("keeps alive player ships clamped to the hull-aware safe freeboard floor", () => {
     const worldState = createInitialWorldState();
     quietWorld(worldState);
 
     const waterAtPlayer = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
     worldState.player.position.y = waterAtPlayer - 5;
     worldState.player.linearVelocity.y = -3;
+    worldState.player.linearVelocity.x = 0;
+    worldState.player.linearVelocity.z = 0;
+    worldState.player.pitch = 0;
+    worldState.player.roll = 0;
 
     updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
 
-    const waterAfterStep = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
-    expect(worldState.player.position.y).toBeGreaterThanOrEqual(waterAfterStep - SHIP_SAFE_SUBMERGE_DEPTH - 1e-6);
-    expect(worldState.player.linearVelocity.y).toBeGreaterThanOrEqual(-0.35 - 1e-6);
+    const minSafeHeight = computeAliveMinSafeHeight(worldState, worldState.player);
+    expect(worldState.player.position.y).toBeCloseTo(minSafeHeight, 6);
+    expect(worldState.player.linearVelocity.y).toBeGreaterThanOrEqual(SHIP_SAFE_DESCENT_VELOCITY_CAP - 1e-6);
+  });
+
+  it("uses soft-band recovery at shallow alive penetration without hard snapping every frame", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    const minSafeHeight = computeAliveMinSafeHeight(worldState, worldState.player);
+    worldState.player.position.y = minSafeHeight - SHIP_SAFE_SUBMERGE_SOFT_BAND * 0.65;
+    worldState.player.linearVelocity.y = -0.15;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+
+    const minSafeAfter = computeAliveMinSafeHeight(worldState, worldState.player);
+    const postStepPenetration = minSafeAfter - worldState.player.position.y;
+    const snappedToFloor = Math.abs(worldState.player.position.y - minSafeAfter) <= 1e-5;
+
+    expect(postStepPenetration).toBeLessThanOrEqual(SHIP_SAFE_SUBMERGE_HARD_BAND + 0.02);
+    expect(worldState.player.linearVelocity.y).toBeGreaterThanOrEqual(SHIP_SAFE_DESCENT_VELOCITY_CAP - 1e-6);
+    expect(snappedToFloor).toBe(false);
+  });
+
+  it("uses probe-aware water reference so safe freeboard can exceed center-only floor on uneven waves", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    let candidate: { x: number; z: number } | null = null;
+    for (let x = -120; x <= 120 && !candidate; x += 8) {
+      for (let z = -120; z <= 120; z += 8) {
+        worldState.player.position.x = x;
+        worldState.player.position.z = z;
+        const center = seaHeightAt(worldState, x, z);
+        const minSafeHeight = computeAliveMinSafeHeight(worldState, worldState.player);
+        const allowedDepth = Math.min(
+          SHIP_SAFE_SUBMERGE_DEPTH_ABSOLUTE_MAX,
+          worldState.player.hull.draft * SHIP_SAFE_SUBMERGE_DEPTH_DRAFT_RATIO
+        );
+        const centerOnlyFloor = center - allowedDepth;
+        if (minSafeHeight - centerOnlyFloor > 0.01) {
+          candidate = { x, z };
+          break;
+        }
+      }
+    }
+
+    expect(candidate).not.toBeNull();
+    if (!candidate) {
+      throw new Error("Expected at least one uneven-wave sample where probe-aware floor exceeds center-only floor.");
+    }
+
+    worldState.player.position.x = candidate.x;
+    worldState.player.position.z = candidate.z;
+    const localWater = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
+    worldState.player.position.y = localWater - 5;
+    worldState.player.linearVelocity.x = 0;
+    worldState.player.linearVelocity.y = -2.5;
+    worldState.player.linearVelocity.z = 0;
+    worldState.player.pitch = 0;
+    worldState.player.roll = 0;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+
+    const minSafeHeight = computeAliveMinSafeHeight(worldState, worldState.player);
+    const centerAfterStep = seaHeightAt(worldState, worldState.player.position.x, worldState.player.position.z);
+    const allowedDepth = Math.min(
+      SHIP_SAFE_SUBMERGE_DEPTH_ABSOLUTE_MAX,
+      worldState.player.hull.draft * SHIP_SAFE_SUBMERGE_DEPTH_DRAFT_RATIO
+    );
+    const centerOnlyFloor = centerAfterStep - allowedDepth;
+
+    expect(minSafeHeight).toBeGreaterThan(centerOnlyFloor + 0.005);
+    expect(worldState.player.position.y).toBeCloseTo(minSafeHeight, 6);
+    expect(worldState.player.linearVelocity.y).toBeGreaterThanOrEqual(SHIP_SAFE_DESCENT_VELOCITY_CAP - 1e-6);
+  });
+
+  it("applies the same alive freeboard guard to enemies", () => {
+    const worldState = createInitialWorldState();
+    worldState.eventDirector.timer = 999;
+    worldState.spawnDirector.maxActive = 1;
+    worldState.storm.active = false;
+
+    stepUntil(worldState, () => worldState.enemies.length > 0, Math.ceil((ENEMY_INITIAL_SPAWN_DELAY + 2) / FIXED_TIME_STEP));
+    const enemy = worldState.enemies[0];
+    expect(enemy).toBeDefined();
+    if (!enemy) {
+      throw new Error("Expected at least one enemy spawn.");
+    }
+
+    enemy.linearVelocity.x = 0;
+    enemy.linearVelocity.z = 0;
+    enemy.pitch = 0;
+    enemy.roll = 0;
+    enemy.position.y = seaHeightAt(worldState, enemy.position.x, enemy.position.z) - 5;
+    enemy.linearVelocity.y = -3;
+
+    updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+
+    const minSafeHeight = computeAliveMinSafeHeight(worldState, enemy);
+    expect(enemy.position.y).toBeGreaterThanOrEqual(minSafeHeight - 0.02);
+    expect(enemy.linearVelocity.y).toBeGreaterThanOrEqual(SHIP_SAFE_DESCENT_VELOCITY_CAP - 1e-6);
+  });
+
+  it("does not let alive freeboard hard-clamp dominate normal idle wave motion", () => {
+    const worldState = createInitialWorldState();
+    quietWorld(worldState);
+
+    worldState.player.linearVelocity.x = 0;
+    worldState.player.linearVelocity.z = 0;
+    worldState.player.speed = 0;
+    worldState.player.drift = 0;
+
+    const sampleFrames = 900;
+    let floorSnapFrames = 0;
+
+    for (let i = 0; i < sampleFrames; i += 1) {
+      updateSimulation(worldState, neutralInput, FIXED_TIME_STEP);
+      const minSafeHeight = computeAliveMinSafeHeight(worldState, worldState.player);
+      if (Math.abs(worldState.player.position.y - minSafeHeight) <= 1e-4) {
+        floorSnapFrames += 1;
+      }
+    }
+
+    const floorSnapRatio = floorSnapFrames / sampleFrames;
+    expect(floorSnapRatio).toBeLessThan(0.8);
   });
 
   it("biases early buoyancy pitch response toward the bow while keeping overshoot stable", () => {

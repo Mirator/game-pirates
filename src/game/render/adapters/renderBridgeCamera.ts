@@ -3,9 +3,12 @@ import type { CameraOrbitState } from "../app/createCamera";
 
 interface CameraPlayerPose {
   x: number;
+  y?: number;
   z: number;
   heading: number;
   speed: number;
+  turnRate: number;
+  acceleration: number;
 }
 
 export interface CameraBridgeState {
@@ -17,6 +20,9 @@ export interface CameraBridgeState {
   cameraSmoothedHeading: number;
   cameraHeadingInitialized: boolean;
   cameraLookInitialized: boolean;
+  cameraAccelLag: number;
+  cameraTurnSwing: number;
+  cameraVerticalLag: number;
 }
 
 const CAMERA_WORLD_UP = { x: 0, y: 1, z: 0 } as const;
@@ -56,7 +62,7 @@ export function syncFollowCamera(
     bridge.cameraSmoothedHeading = playerPose.heading;
     bridge.cameraHeadingInitialized = true;
   } else {
-    const headingFollowStrength = 1 - Math.exp(-13.5 * frameDt);
+    const headingFollowStrength = 1 - Math.exp(-10.5 * frameDt);
     bridge.cameraSmoothedHeading = shortestAngleLerp(
       bridge.cameraSmoothedHeading,
       playerPose.heading,
@@ -64,16 +70,31 @@ export function syncFollowCamera(
     );
   }
 
+  const speedAbs = Math.abs(playerPose.speed);
+  const accelNorm = clamp(playerPose.acceleration / 18, -1, 1);
+  const turnNorm = clamp(playerPose.turnRate / 2.4, -1, 1);
+
+  const accelLagTarget = clamp(accelNorm * 1.25, -0.65, 1.55);
+  const accelLagFollow = accelLagTarget > bridge.cameraAccelLag ? 1 - Math.exp(-4.8 * frameDt) : 1 - Math.exp(-2.8 * frameDt);
+  bridge.cameraAccelLag = lerp(bridge.cameraAccelLag, accelLagTarget, accelLagFollow);
+
+  const turnSwingTarget = clamp(turnNorm * 0.28, -0.34, 0.34);
+  const turnSwingFollow = 1 - Math.exp(-4.2 * frameDt);
+  bridge.cameraTurnSwing = lerp(bridge.cameraTurnSwing, turnSwingTarget, turnSwingFollow);
+
+  const heaveInput = clamp((playerPose.y ?? 0) * 0.55, -0.38, 0.55);
+  const verticalLagFollow = 1 - Math.exp(-2.15 * frameDt);
+  bridge.cameraVerticalLag = lerp(bridge.cameraVerticalLag, heaveInput, verticalLagFollow);
+
   const cameraForwardX = Math.sin(bridge.cameraSmoothedHeading);
   const cameraForwardZ = Math.cos(bridge.cameraSmoothedHeading);
-  const orbitHeading = bridge.cameraSmoothedHeading + bridge.cameraOrbit.yawOffset;
+  const orbitHeading = bridge.cameraSmoothedHeading + bridge.cameraOrbit.yawOffset - bridge.cameraTurnSwing;
   const orbitForwardX = Math.sin(orbitHeading);
   const orbitForwardZ = Math.cos(orbitHeading);
-  const speedAbs = Math.abs(playerPose.speed);
-  const followDistance = 12 + clamp(speedAbs * 0.3, 0, 2.4);
+  const followDistance = 12 + clamp(speedAbs * 0.3, 0, 2.4) + bridge.cameraAccelLag;
   const orbitPlanarDistance = followDistance * Math.cos(bridge.cameraOrbit.pitchOffset);
   const orbitHeightOffset = Math.sin(bridge.cameraOrbit.pitchOffset) * followDistance;
-  const desiredHeight = 6.7 + clamp(speedAbs * 0.11, 0, 1.0);
+  const desiredHeight = 6.7 + clamp(speedAbs * 0.11, 0, 1.0) + bridge.cameraVerticalLag;
 
   bridge.cameraDesiredPosition.set(
     playerPose.x - orbitForwardX * orbitPlanarDistance,
@@ -81,10 +102,10 @@ export function syncFollowCamera(
     playerPose.z - orbitForwardZ * orbitPlanarDistance
   );
 
-  const desiredLookAhead = 1.15 + clamp(speedAbs * 0.03, 0, 0.24);
+  const desiredLookAhead = 1.15 + clamp(speedAbs * 0.03, 0, 0.24) - bridge.cameraAccelLag * 0.08;
   bridge.cameraDesiredLookTarget.set(
     playerPose.x + cameraForwardX * desiredLookAhead,
-    1.5 + clamp(speedAbs * 0.035, 0, 0.25),
+    1.5 + clamp(speedAbs * 0.035, 0, 0.25) + bridge.cameraVerticalLag * 0.32,
     playerPose.z + cameraForwardZ * desiredLookAhead
   );
 
@@ -94,8 +115,9 @@ export function syncFollowCamera(
     bridge.cameraLookInitialized = true;
   }
 
-  const positionFollowStrength = 1 - Math.exp(-5.2 * frameDt);
-  const verticalFollowStrength = 1 - Math.exp(-2.35 * frameDt);
+  const accelLagDamp = 1 - clamp(Math.max(0, accelNorm) * 0.2, 0, 0.2);
+  const positionFollowStrength = (1 - Math.exp(-5.2 * frameDt)) * accelLagDamp;
+  const verticalFollowStrength = 1 - Math.exp(-2.1 * frameDt);
   const lookFollowStrength = 1 - Math.exp(-3.4 * frameDt);
 
   bridge.camera.position.x = lerp(bridge.camera.position.x, bridge.cameraDesiredPosition.x, positionFollowStrength);
